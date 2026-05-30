@@ -1,0 +1,178 @@
+const std = @import("std"); // This is just an example of how to import a function from another source file in the same package. You can remove this if you don't need it.
+const zvkw = @import("../../Vulkan/zVulkanContext.zig");
+const components = @import("../Component/components.zig");
+const Registry = @import("../Storage/registry.zig").Registry;
+const cs = @import("../System/cameraSystem.zig");
+
+pub const GpuMesh = struct {
+    vertexBuffer: zvkw.zvk.VkBuffer,
+    vertexAllocation: zvkw.vma.VmaAllocation,
+    indexBuffer: zvkw.zvk.VkBuffer,
+    indexAllocation: zvkw.vma.VmaAllocation,
+    indexCount: u32,
+};
+
+fn uploadToGpu(
+    data: *const anyopaque,
+    size: zvkw.zvk.VkDeviceSize,
+    usage: zvkw.zvk.VkBufferUsageFlags,
+    out_buffer: *zvkw.zvk.VkBuffer,
+    out_allocation: *zvkw.vma.VmaAllocation,
+) !void {
+    // --- Staging buffer (CPU writable) ---
+    const stagingCI = zvkw.zvk.VkBufferCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = zvkw.zvk.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    };
+    const stagingAllocCI = zvkw.vma.VmaAllocationCreateInfo{
+        .flags = zvkw.vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            zvkw.vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
+            zvkw.vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
+    };
+
+    var stagingBuffer: zvkw.vma.VkBuffer = null;
+    var stagingAllocation: zvkw.vma.VmaAllocation = null;
+    var stagingInfo: zvkw.vma.VmaAllocationInfo = undefined;
+
+    if (zvkw.vma.vmaCreateBuffer(
+        zvkw.vmaAllocator,
+        @ptrCast(&stagingCI),
+        &stagingAllocCI,
+        @ptrCast(&stagingBuffer),
+        &stagingAllocation,
+        &stagingInfo,
+    ) != zvkw.zvk.VK_SUCCESS) return error.StagingBufferCreateFailed;
+
+    @memcpy(@as([*]u8, @ptrCast(@alignCast(stagingInfo.pMappedData)))[0..size], @as([*]const u8, @ptrCast(data))[0..size]);
+
+    // --- Device-local GPU buffer ---
+    const bufferCI = zvkw.zvk.VkBufferCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = @as(u32, @bitCast(zvkw.zvk.VK_BUFFER_USAGE_TRANSFER_DST_BIT)) | usage,
+    };
+    const bufferAllocCI = zvkw.vma.VmaAllocationCreateInfo{
+        .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
+    };
+
+    if (zvkw.vma.vmaCreateBuffer(
+        zvkw.vmaAllocator,
+        @ptrCast(&bufferCI),
+        &bufferAllocCI,
+        @ptrCast(out_buffer),
+        out_allocation,
+        null,
+    ) != zvkw.zvk.VK_SUCCESS) return error.GpuBufferCreateFailed;
+
+    // --- One-time command buffer ---
+    const cbAllocInfo = zvkw.zvk.VkCommandBufferAllocateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = zvkw.commandPool,
+        .level = zvkw.zvk.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    var cmd: zvkw.zvk.VkCommandBuffer = null;
+    _ = zvkw.zvk.vkAllocateCommandBuffers(zvkw.m_Device, &cbAllocInfo, &cmd);
+
+    const beginInfo = zvkw.zvk.VkCommandBufferBeginInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    _ = zvkw.zvk.vkBeginCommandBuffer(cmd, &beginInfo);
+
+    const copy = zvkw.zvk.VkBufferCopy{ .size = size };
+    zvkw.zvk.vkCmdCopyBuffer(cmd, @ptrCast(stagingBuffer), out_buffer.*, 1, &copy);
+
+    _ = zvkw.zvk.vkEndCommandBuffer(cmd);
+
+    // --- Submit and stall ---
+    const fenceCI = zvkw.zvk.VkFenceCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+    };
+    var fence: zvkw.zvk.VkFence = null;
+    _ = zvkw.zvk.vkCreateFence(zvkw.m_Device, &fenceCI, null, &fence);
+
+    const submitInfo = zvkw.zvk.VkSubmitInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd,
+    };
+    _ = zvkw.zvk.vkQueueSubmit(zvkw.queue, 1, &submitInfo, fence);
+    _ = zvkw.zvk.vkWaitForFences(zvkw.m_Device, 1, &fence, zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
+
+    // --- Cleanup ---
+    zvkw.zvk.vkDestroyFence(zvkw.m_Device, fence, null);
+    zvkw.zvk.vkFreeCommandBuffers(zvkw.m_Device, zvkw.commandPool, 1, &cmd);
+    zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, stagingBuffer, stagingAllocation);
+}
+fn uploadMesh(mesh: *const components.MeshComponent) !GpuMesh {
+    var gpuMesh: GpuMesh = undefined;
+    try uploadToGpu(
+        mesh.vertices.ptr,
+        @sizeOf(components.Vertex) * mesh.vertices.len,
+        zvkw.zvk.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        &gpuMesh.vertexBuffer,
+        &gpuMesh.vertexAllocation,
+    );
+    try uploadToGpu(
+        mesh.indices.ptr,
+        @sizeOf(u32) * mesh.indices.len,
+        zvkw.zvk.VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        &gpuMesh.indexBuffer,
+        &gpuMesh.indexAllocation,
+    );
+    gpuMesh.indexCount = @intCast(mesh.indices.len);
+    return gpuMesh;
+}
+pub const renderSystem = struct {
+    gpu_meshes: std.AutoHashMap(u32, GpuMesh),
+
+    pub fn init() renderSystem {
+        return .{
+            .gpu_meshes = std.AutoHashMap(u32, GpuMesh).init(zvkw.zallocator),
+        };
+    }
+    pub fn update(self: *renderSystem, registry: *Registry, matrices: cs.CameraMatrices, cb: zvkw.zvk.VkCommandBuffer) !void {
+        var it = registry.Query(.{ components.MeshComponent, components.TransformComponent });
+        while (it.next()) |entity_id| {
+            const mesh = registry.get(components.MeshComponent, entity_id).?;
+            const transform = registry.get(components.TransformComponent, entity_id).?;
+            if (!mesh.isValid()) continue;
+            if (!self.gpu_meshes.contains(entity_id)) {
+                const gpu_mesh = try uploadMesh(mesh);
+                try self.gpu_meshes.put(entity_id, gpu_mesh);
+                std.log.info("RenderSystem: uploaded mesh for entity {}", .{entity_id});
+            }
+            const gpu_mesh = self.gpu_meshes.get(entity_id).?;
+            const offset: zvkw.zvk.VkDeviceSize = 0;
+            zvkw.zvk.vkCmdBindVertexBuffers(cb, 0, 1, &gpu_mesh.vertexBuffer, &offset);
+            zvkw.zvk.vkCmdBindIndexBuffer(cb, gpu_mesh.indexBuffer, 0, zvkw.zvk.VK_INDEX_TYPE_UINT32);
+            const pushData = zvkw.shaderData{
+                .projection = matrices.projection,
+                .view = matrices.view,
+                .model = transformToMatrix(transform),
+            };
+            zvkw.zvk.vkCmdPushConstants(cb, zvkw.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.shaderData), @ptrCast(&pushData));
+            zvkw.zvk.vkCmdDrawIndexed(cb, gpu_mesh.indexCount, 1, 0, 0, 0);
+        }
+    }
+    pub fn deinit(self: *renderSystem) void {
+        var it = self.gpu_meshes.iterator();
+        while (it.next()) |entry| {
+            zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(entry.value_ptr.vertexBuffer), entry.value_ptr.vertexAllocation);
+            zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(entry.value_ptr.indexBuffer), entry.value_ptr.indexAllocation);
+        }
+        self.gpu_meshes.deinit();
+    }
+};
+fn transformToMatrix(transform: *const components.TransformComponent) [4][4]f32 {
+    // placeholder — identity with translation only for now
+    return [4][4]f32{
+        .{ transform.scale[0], 0.0, 0.0, 0.0 },
+        .{ 0.0, transform.scale[1], 0.0, 0.0 },
+        .{ 0.0, 0.0, transform.scale[2], 0.0 },
+        .{ transform.position[0], transform.position[1], transform.position[2], 1.0 },
+    };
+}

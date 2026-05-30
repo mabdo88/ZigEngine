@@ -1,0 +1,63 @@
+const std = @import("std");
+const Registry = @import("Storage/registry.zig").Registry;
+const Entity = @import("Entity/entity.zig").Entity;
+const component = @import("Component/components.zig");
+const scomponent = @import("../ecs/Component/SystemComponents.zig");
+const systems = @import("System/systems.zig");
+
+var triangle: Entity = .{};
+var camera: Entity = .{};
+
+pub const World = struct {
+    entity: Entity = .{},
+    registry: Registry = undefined,
+    world_allocator: std.mem.Allocator = undefined,
+    window: scomponent.WindowComponent = .{ .Window_title = "ZVulkan Window", .Window_width = 800, .Window_height = 600 },
+    renderer: scomponent.VulkanContextComponent = .{},
+    pub fn init(self: *World, allocator: std.mem.Allocator) !void {
+        std.log.info("Initializing World...", .{});
+        self.world_allocator = allocator;
+        self.registry.init(self.world_allocator);
+        self.entity = self.registry.createEntity();
+        std.log.info("Created World Entity: {d}", .{self.entity.index});
+        std.log.info("World Created ", .{});
+        try self.initVulkan(self.window.Window_title, self.window.Window_width, self.window.Window_height);
+        camera = self.registry.createEntity();
+        try self.registry.attach(camera, component.CameraComponent{});
+        triangle = self.registry.createEntity();
+        const verts = [_]component.Vertex{
+            .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+            .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+            .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+        };
+        const idx = [_]u32{ 0, 1, 2 };
+        try self.registry.attach(triangle, component.MeshComponent{ .vertices = &verts, .indices = &idx });
+        try self.registry.attach(triangle, component.TransformComponent{
+            .position = .{ 0.0, 0.0, -2.0 },
+            .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+            .scale = .{ 1.0, 1.0, 1.0 },
+        });
+    }
+    pub fn deinit(self: *World) void {
+        systems.renderer.deinit();
+        self.registry.destroyEntity(camera);
+        self.registry.destroyEntity(triangle);
+        self.registry.destroyEntity(self.entity);
+        std.log.info("World Destroyed", .{});
+        std.log.info("Engine running with {d} entities before shutdown", .{self.registry.aliveCount()});
+        self.registry.deinit();
+        self.world_allocator = undefined;
+    }
+    pub fn initVulkan(self: *World, t: ?[:0]const u8, w: u16, h: u16) !void {
+        _ = try systems.renderer.init(self.world_allocator, t, w, h, &self.registry);
+    }
+    pub fn run(self: *World) !void {
+        std.log.info("World running with {d} entities", .{self.registry.aliveCount()});
+        while (!systems.renderer.shouldClose()) {
+            systems.renderer.pollEvents();
+            const matrices = systems.camera.update(&self.registry);
+            try systems.renderer.render(matrices.?);
+        }
+    }
+    //pub fn runTestCode(self: *World) void {}
+};

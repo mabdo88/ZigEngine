@@ -1,0 +1,1 @@
+C:/VulkanSDK/1.4.341.1/bin/slangc.exe TorusKnot.slang -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name -entry vertMain -entry fragMain -o Torus.spv
