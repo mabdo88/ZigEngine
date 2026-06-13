@@ -6,6 +6,12 @@ const scomponent = @import("../ecs/Component/SystemComponents.zig");
 const systems = @import("System/systems.zig");
 
 var triangle: Entity = .{};
+const verts = [_]component.Vertex{
+    .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+    .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+    .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+};
+const idx = [_]u32{ 0, 1, 2 };
 var camera: Entity = .{};
 
 pub const World = struct {
@@ -25,12 +31,7 @@ pub const World = struct {
         camera = self.registry.createEntity();
         try self.registry.attach(camera, component.CameraComponent{});
         triangle = self.registry.createEntity();
-        const verts = [_]component.Vertex{
-            .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
-            .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
-            .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
-        };
-        const idx = [_]u32{ 0, 1, 2 };
+
         try self.registry.attach(triangle, component.MeshComponent{ .vertices = &verts, .indices = &idx });
         try self.registry.attach(triangle, component.TransformComponent{
             .position = .{ 0.0, 0.0, -2.0 },

@@ -10,6 +10,7 @@ pub const GpuMesh = struct {
     indexBuffer: zvkw.zvk.VkBuffer,
     indexAllocation: zvkw.vma.VmaAllocation,
     indexCount: u32,
+    source_ptr: [*]const components.Vertex,
 };
 
 fn uploadToGpu(
@@ -140,11 +141,18 @@ pub const renderSystem = struct {
             const mesh = registry.get(components.MeshComponent, entity_id).?;
             const transform = registry.get(components.TransformComponent, entity_id).?;
             if (!mesh.isValid()) continue;
-            if (!self.gpu_meshes.contains(entity_id)) {
-                const gpu_mesh = try uploadMesh(mesh);
+            const needs_upload = if (self.gpu_meshes.get(entity_id)) |existing| existing.source_ptr != mesh.vertices.ptr else true;
+            if (needs_upload) {
+                if (self.gpu_meshes.get(entity_id)) |old| {
+                    zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(old.vertexBuffer), old.vertexAllocation);
+                    zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(old.indexBuffer), old.indexAllocation);
+                }
+                var gpu_mesh = try uploadMesh(mesh);
+                gpu_mesh.source_ptr = mesh.vertices.ptr;
                 try self.gpu_meshes.put(entity_id, gpu_mesh);
                 std.log.info("RenderSystem: uploaded mesh for entity {}", .{entity_id});
             }
+
             const gpu_mesh = self.gpu_meshes.get(entity_id).?;
             const offset: zvkw.zvk.VkDeviceSize = 0;
             zvkw.zvk.vkCmdBindVertexBuffers(cb, 0, 1, &gpu_mesh.vertexBuffer, &offset);
