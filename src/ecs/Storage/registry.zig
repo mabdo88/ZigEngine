@@ -63,6 +63,12 @@ pub const Registry = struct {
         self.generations.items[index] += 1; // Increment generation to invalidate old references
         self.freeList.append(self.registry_allocator, index) catch unreachable; // Add index back to free list
         inline for (0..self.storage.len) |i| {
+            const C = @TypeOf(self.storage[i]).ComponentType;
+            if (@hasDecl(C, "deinit")) {
+                if (self.storage[i].get(entity)) |component| {
+                    component.deinit(self.registry_allocator);
+                }
+            }
             self.storage[i].remove(entity) catch {};
         }
     }

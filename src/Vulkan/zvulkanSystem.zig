@@ -48,14 +48,27 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
     try createDepthImage();
     try createSyncObjects();
     try createCommandPool();
+    try createDescriptorSetLayout();
     try createPipeline();
+    try createDescriptorPool();
+    try createDescriptorSets();
+    try createShaderDataBuffers();
+    try createSampler();
+    try createDefaultTexture();
     renderSystem = rs.init();
-    //try createVertexBuffer();
-    //try createShaderDataBuffers();
 }
 
 pub fn deinit() void {
     _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.m_Device);
+    // destroy textures
+    for (0..zvkw.textureCount) |i| {
+        zvkw.zvk.vkDestroyImageView(zvkw.m_Device, zvkw.textureSlots[i].view, null);
+        zvkw.vma.vmaDestroyImage(zvkw.vmaAllocator, @ptrCast(zvkw.textureSlots[i].image), zvkw.textureSlots[i].allocation);
+    }
+    zvkw.zvk.vkDestroySampler(zvkw.m_Device, zvkw.bindlessSampler, null);
+    zvkw.zvk.vkDestroyDescriptorPool(zvkw.m_Device, zvkw.descriptorPool, null);
+    zvkw.zvk.vkDestroyDescriptorSetLayout(zvkw.m_Device, zvkw.uboDescriptorSetLayout, null);
+    zvkw.zvk.vkDestroyDescriptorSetLayout(zvkw.m_Device, zvkw.bindlessDescriptorSetLayout, null);
     zvkw.zvk.vkDestroyPipeline(zvkw.m_Device, zvkw.pipeline, null);
     zvkw.zvk.vkDestroyPipelineLayout(zvkw.m_Device, zvkw.pipelineLayout, null);
     for (zvkw.swapChainImageViews) |view| {
@@ -216,6 +229,8 @@ fn createLogicalDevice() !void {
     var vk12Features = zvkw.zvk.VkPhysicalDeviceVulkan12Features{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .pNext = &vk11Features,
+        .descriptorBindingPartiallyBound = zvkw.zvk.VK_TRUE,
+        .descriptorBindingSampledImageUpdateAfterBind = zvkw.zvk.VK_TRUE,
         .descriptorIndexing = zvkw.zvk.VK_TRUE,
         .shaderSampledImageArrayNonUniformIndexing = zvkw.zvk.VK_TRUE,
         .descriptorBindingVariableDescriptorCount = zvkw.zvk.VK_TRUE,
@@ -462,6 +477,11 @@ pub fn render(matrices: cs.CameraMatrices) !void {
     _ = zvkw.zvk.vkResetFences(zvkw.m_Device, 1, &zvkw.fences[zvkw.frameIndex]);
     _ = zvkw.zvk.vkAcquireNextImageKHR(zvkw.m_Device, zvkw.swapChain, std.math.maxInt(u64), zvkw.imageAcquiredSemaphores[zvkw.frameIndex], null, &zvkw.imageIndex);
 
+    const uboData = zvkw.FrameUBO{
+        .projection = matrices.projection,
+        .view = matrices.view,
+    };
+    @memcpy(@as([*]u8, @ptrCast(zvkw.shaderDataBuffers[zvkw.frameIndex].allocInfo.pMappedData.?))[0..@sizeOf(zvkw.FrameUBO)], std.mem.asBytes(&uboData));
     const cb = zvkw.commandBuffers[zvkw.frameIndex];
     _ = zvkw.zvk.vkResetCommandBuffer(cb, 0);
 
@@ -543,7 +563,7 @@ pub fn render(matrices: cs.CameraMatrices) !void {
     };
     zvkw.zvk.vkCmdSetScissor(cb, 0, 1, &scissor);
     zvkw.zvk.vkCmdBindPipeline(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.pipeline);
-    try renderSystem.update(registry, matrices, cb);
+    try renderSystem.update(registry, cb);
     zvkw.zvk.vkCmdEndRendering(cb);
 
     const barrierPresent = zvkw.zvk.VkImageMemoryBarrier2{
@@ -623,15 +643,16 @@ fn createPipeline() !void {
         .stride = @sizeOf(zvkw.Vertex),
         .inputRate = zvkw.zvk.VK_VERTEX_INPUT_RATE_VERTEX,
     };
-    const vertexAttribDescs = [2]zvkw.zvk.VkVertexInputAttributeDescription{
-        .{ .location = 0, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32B32_SFLOAT, .offset = 0 },
-        .{ .location = 1, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32B32_SFLOAT, .offset = @offsetOf(zvkw.Vertex, "color") },
+    const vertexAttribDescs = [3]zvkw.zvk.VkVertexInputAttributeDescription{
+        .{ .location = 0, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32B32_SFLOAT, .offset = @offsetOf(zvkw.Vertex, "pos") },
+        .{ .location = 1, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32B32_SFLOAT, .offset = @offsetOf(zvkw.Vertex, "normal") },
+        .{ .location = 2, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32_SFLOAT, .offset = @offsetOf(zvkw.Vertex, "uv") },
     };
     const vertexInputCI = zvkw.zvk.VkPipelineVertexInputStateCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount = 1,
         .pVertexBindingDescriptions = &vertexBindingDesc,
-        .vertexAttributeDescriptionCount = 2,
+        .vertexAttributeDescriptionCount = 3,
         .pVertexAttributeDescriptions = &vertexAttribDescs,
     };
     const inputAssemblyCI = zvkw.zvk.VkPipelineInputAssemblyStateCreateInfo{
@@ -681,10 +702,16 @@ fn createPipeline() !void {
     const pushConstantRange = zvkw.zvk.VkPushConstantRange{
         .stageFlags = zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
-        .size = @sizeOf(zvkw.shaderData), // VkDeviceAddress
+        .size = @sizeOf(zvkw.pushConstants), // VkDeviceAddress
+    };
+    const setLayouts = [2]zvkw.zvk.VkDescriptorSetLayout{
+        zvkw.uboDescriptorSetLayout,
+        zvkw.bindlessDescriptorSetLayout,
     };
     const pipelineLayoutCI = zvkw.zvk.VkPipelineLayoutCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 2,
+        .pSetLayouts = &setLayouts,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pushConstantRange,
     };
@@ -716,6 +743,304 @@ fn createPipeline() !void {
     if (result2 != zvkw.zvk.VK_SUCCESS) return error.CreatePipelineFailed;
 }
 
+fn createDescriptorSetLayout() !void {
+    const uboBinding = zvkw.zvk.VkDescriptorSetLayoutBinding{
+        .binding = 0,
+        .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT,
+    };
+    const uboLayoutCI = zvkw.zvk.VkDescriptorSetLayoutCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &uboBinding,
+    };
+    var result = zvkw.zvk.vkCreateDescriptorSetLayout(zvkw.m_Device, &uboLayoutCI, null, &zvkw.uboDescriptorSetLayout);
+    if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorSetLayoutFailed;
+
+    const textureBinding = zvkw.zvk.VkDescriptorSetLayoutBinding{
+        .binding = 0,
+        .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = zvkw.MAX_TEXTURES,
+        .stageFlags = zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
+    };
+    const bindingFlags: u32 = zvkw.zvk.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+        zvkw.zvk.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+    const bindingFlagsCI = zvkw.zvk.VkDescriptorSetLayoutBindingFlagsCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindingFlags = &bindingFlags,
+    };
+    const bindlessLayoutCI = zvkw.zvk.VkDescriptorSetLayoutCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .flags = zvkw.zvk.VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
+        .pNext = &bindingFlagsCI,
+        .bindingCount = 1,
+        .pBindings = &textureBinding,
+    };
+    result = zvkw.zvk.vkCreateDescriptorSetLayout(zvkw.m_Device, &bindlessLayoutCI, null, &zvkw.bindlessDescriptorSetLayout);
+    if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorSetLayoutFailed;
+}
+fn createDescriptorPool() !void {
+    const poolSize = [2]zvkw.zvk.VkDescriptorPoolSize{
+        .{
+            .type = zvkw.zvk.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = zvkw.max_frames_in_flight,
+        },
+        .{
+            .type = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = zvkw.MAX_TEXTURES,
+        },
+    };
+    const poolCI = zvkw.zvk.VkDescriptorPoolCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = zvkw.zvk.VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
+        .maxSets = zvkw.max_frames_in_flight + 1,
+        .poolSizeCount = 2,
+        .pPoolSizes = &poolSize,
+    };
+    const result = zvkw.zvk.vkCreateDescriptorPool(zvkw.m_Device, &poolCI, null, &zvkw.descriptorPool);
+    if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorPoolFailed;
+}
+fn createSampler() !void {
+    const samplerCI = zvkw.zvk.VkSamplerCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = zvkw.zvk.VK_FILTER_LINEAR,
+        .minFilter = zvkw.zvk.VK_FILTER_LINEAR,
+        .mipmapMode = zvkw.zvk.VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .addressModeU = zvkw.zvk.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = zvkw.zvk.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = zvkw.zvk.VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .mipLodBias = 0.0,
+        .anisotropyEnable = zvkw.zvk.VK_TRUE,
+        .maxAnisotropy = 16.0,
+        .compareEnable = zvkw.zvk.VK_FALSE,
+        .minLod = 0.0,
+        .maxLod = zvkw.zvk.VK_LOD_CLAMP_NONE,
+        .unnormalizedCoordinates = zvkw.zvk.VK_FALSE,
+    };
+    const result = zvkw.zvk.vkCreateSampler(zvkw.m_Device, &samplerCI, null, &zvkw.bindlessSampler);
+    if (result != zvkw.zvk.VK_SUCCESS) return error.CreateSamplerFailed;
+}
+pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureHandle {
+    const slot = zvkw.textureCount;
+    if (slot > zvkw.MAX_TEXTURES) return error.TextureHeapFull;
+    const imageSize: zvkw.zvk.VkDeviceSize = width * height * 4;
+    var stagingBuffer: zvkw.zvk.VkBuffer = null;
+    var stagingAllocation: zvkw.vma.VmaAllocation = null;
+    const stagingBufferCI = zvkw.zvk.VkBufferCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = imageSize,
+        .usage = zvkw.zvk.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+    };
+    const stagingAllocCI = zvkw.vma.VmaAllocationCreateInfo{
+        .flags = zvkw.vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            zvkw.vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
+    };
+    var stagingAllocInfo: zvkw.vma.VmaAllocationInfo = undefined;
+    _ = zvkw.vma.vmaCreateBuffer(zvkw.vmaAllocator, @ptrCast(&stagingBufferCI), &stagingAllocCI, @ptrCast(&stagingBuffer), &stagingAllocation, &stagingAllocInfo);
+    defer zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(stagingBuffer), stagingAllocation);
+    const dst: [*]u8 = @ptrCast(stagingAllocInfo.pMappedData.?);
+    @memcpy(dst[0..imageSize], pixels[0..imageSize]);
+    const imageCI = zvkw.zvk.VkImageCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = zvkw.zvk.VK_IMAGE_TYPE_2D,
+        .format = zvkw.zvk.VK_FORMAT_R8G8B8A8_SRGB,
+        .extent = .{ .width = width, .height = height, .depth = 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = zvkw.zvk.VK_SAMPLE_COUNT_1_BIT,
+        .tiling = zvkw.zvk.VK_IMAGE_TILING_OPTIMAL,
+        .usage = zvkw.zvk.VK_IMAGE_USAGE_TRANSFER_DST_BIT | zvkw.zvk.VK_IMAGE_USAGE_SAMPLED_BIT,
+        .initialLayout = zvkw.zvk.VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    const imageAllocCI = zvkw.vma.VmaAllocationCreateInfo{
+        .flags = zvkw.vma.VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+        .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
+    };
+    _ = zvkw.vma.vmaCreateImage(zvkw.vmaAllocator, @ptrCast(&imageCI), &imageAllocCI, @ptrCast(&zvkw.textureSlots[slot].image), &zvkw.textureSlots[slot].allocation, null);
+    var cb: zvkw.zvk.VkCommandBuffer = null;
+    const cbAllocCI = zvkw.zvk.VkCommandBufferAllocateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = zvkw.commandPool,
+        .level = zvkw.zvk.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    _ = zvkw.zvk.vkAllocateCommandBuffers(zvkw.m_Device, &cbAllocCI, &cb);
+    defer zvkw.zvk.vkFreeCommandBuffers(zvkw.m_Device, zvkw.commandPool, 1, &cb);
+    const beginInfo = zvkw.zvk.VkCommandBufferBeginInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    _ = zvkw.zvk.vkBeginCommandBuffer(cb, &beginInfo);
+    const toTransferBarrier = zvkw.zvk.VkImageMemoryBarrier2{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_NONE,
+        .srcAccessMask = zvkw.zvk.VK_ACCESS_2_NONE,
+        .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_COPY_BIT,
+        .dstAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .image = zvkw.textureSlots[slot].image,
+        .subresourceRange = .{
+            .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    const toTransferDep = zvkw.zvk.VkDependencyInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &toTransferBarrier,
+    };
+    zvkw.zvk.vkCmdPipelineBarrier2(cb, &toTransferDep);
+    const copyRegion = zvkw.zvk.VkBufferImageCopy{
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = .{
+            .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset = .{ .x = 0, .y = 0, .z = 0 },
+        .imageExtent = .{ .width = width, .height = height, .depth = 1 },
+    };
+    zvkw.zvk.vkCmdCopyBufferToImage(cb, stagingBuffer, zvkw.textureSlots[slot].image, zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+    const toShaderBarrier = zvkw.zvk.VkImageMemoryBarrier2{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_COPY_BIT,
+        .srcAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = zvkw.zvk.VK_ACCESS_2_SHADER_READ_BIT,
+        .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .image = zvkw.textureSlots[slot].image,
+        .subresourceRange = .{
+            .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    const toShaderDep = zvkw.zvk.VkDependencyInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &toShaderBarrier,
+    };
+    zvkw.zvk.vkCmdPipelineBarrier2(cb, &toShaderDep);
+    _ = zvkw.zvk.vkEndCommandBuffer(cb);
+    const submitInfo = zvkw.zvk.VkSubmitInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cb,
+    };
+    _ = zvkw.zvk.vkQueueSubmit(zvkw.queue, 1, &submitInfo, null);
+    _ = zvkw.zvk.vkQueueWaitIdle(zvkw.queue);
+    const viewCI = zvkw.zvk.VkImageViewCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = zvkw.textureSlots[slot].image,
+        .viewType = zvkw.zvk.VK_IMAGE_VIEW_TYPE_2D,
+        .format = zvkw.zvk.VK_FORMAT_R8G8B8A8_SRGB,
+        .subresourceRange = .{
+            .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+    _ = zvkw.zvk.vkCreateImageView(zvkw.m_Device, &viewCI, null, &zvkw.textureSlots[slot].view);
+    const imageInfo = zvkw.zvk.VkDescriptorImageInfo{
+        .sampler = zvkw.bindlessSampler,
+        .imageView = zvkw.textureSlots[slot].view,
+        .imageLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+    };
+    const write = zvkw.zvk.VkWriteDescriptorSet{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = zvkw.bindlessDescriptorSet,
+        .dstBinding = 0,
+        .dstArrayElement = slot,
+        .descriptorCount = 1,
+        .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo = &imageInfo,
+    };
+    zvkw.zvk.vkUpdateDescriptorSets(zvkw.m_Device, 1, &write, 0, null);
+    zvkw.textureCount += 1;
+    return slot;
+}
+fn createDefaultTexture() !void {
+    const white = [4]u8{ 255, 255, 255, 255 };
+    _ = try uploadTexture(&white, 1, 1);
+}
+fn createDescriptorSets() !void {
+    const uboLayouts = [zvkw.max_frames_in_flight]zvkw.zvk.VkDescriptorSetLayout{
+        zvkw.uboDescriptorSetLayout,
+        zvkw.uboDescriptorSetLayout,
+    };
+    const uboAllocInfo = zvkw.zvk.VkDescriptorSetAllocateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = zvkw.descriptorPool,
+        .descriptorSetCount = zvkw.max_frames_in_flight,
+        .pSetLayouts = &uboLayouts,
+    };
+    var result = zvkw.zvk.vkAllocateDescriptorSets(zvkw.m_Device, &uboAllocInfo, &zvkw.uboDescriptorSets);
+    if (result != zvkw.zvk.VK_SUCCESS) return error.AllocateDescriptorSetsFailed;
+
+    const bindlessAllocInfo = zvkw.zvk.VkDescriptorSetAllocateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = zvkw.descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &zvkw.bindlessDescriptorSetLayout,
+    };
+    result = zvkw.zvk.vkAllocateDescriptorSets(zvkw.m_Device, &bindlessAllocInfo, &zvkw.bindlessDescriptorSet);
+    if (result != zvkw.zvk.VK_SUCCESS) return error.AllocateDescriptorSetsFailed;
+}
+
+fn createShaderDataBuffers() !void {
+    for (0..zvkw.max_frames_in_flight) |i| {
+        const bufferCI = zvkw.zvk.VkBufferCreateInfo{
+            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = @sizeOf(zvkw.FrameUBO),
+            .usage = zvkw.zvk.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        };
+        const allocCI = zvkw.vma.VmaAllocationCreateInfo{
+            .flags = zvkw.vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+                zvkw.vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
+        };
+        const result = zvkw.vma.vmaCreateBuffer(
+            zvkw.vmaAllocator,
+            @ptrCast(&bufferCI),
+            &allocCI,
+            @ptrCast(&zvkw.shaderDataBuffers[i].buffer),
+            &zvkw.shaderDataBuffers[i].allocation,
+            &zvkw.shaderDataBuffers[i].allocInfo,
+        );
+        if (result != zvkw.zvk.VK_SUCCESS) return error.CreateShaderDataBufferFailed;
+
+        const bufferInfo = zvkw.zvk.VkDescriptorBufferInfo{
+            .buffer = zvkw.shaderDataBuffers[i].buffer,
+            .offset = 0,
+            .range = @sizeOf(zvkw.FrameUBO),
+        };
+        const write = zvkw.zvk.VkWriteDescriptorSet{
+            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = zvkw.uboDescriptorSets[i],
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .pBufferInfo = &bufferInfo,
+        };
+        zvkw.zvk.vkUpdateDescriptorSets(zvkw.m_Device, 1, &write, 0, null);
+    }
+}
 pub fn shouldClose() bool {
     return zvkw.zvk.vkWindowShouldClose(&zvkw.m_window);
 }

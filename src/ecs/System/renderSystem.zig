@@ -135,7 +135,9 @@ pub const renderSystem = struct {
             .gpu_meshes = std.AutoHashMap(u32, GpuMesh).init(zvkw.zallocator),
         };
     }
-    pub fn update(self: *renderSystem, registry: *Registry, matrices: cs.CameraMatrices, cb: zvkw.zvk.VkCommandBuffer) !void {
+    pub fn update(self: *renderSystem, registry: *Registry, cb: zvkw.zvk.VkCommandBuffer) !void {
+        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.pipelineLayout, 0, 1, &zvkw.uboDescriptorSets[zvkw.frameIndex], 0, null);
+        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.pipelineLayout, 1, 1, &zvkw.bindlessDescriptorSet, 0, null);
         var it = registry.Query(.{ components.MeshComponent, components.TransformComponent });
         while (it.next()) |entity_id| {
             const mesh = registry.get(components.MeshComponent, entity_id).?;
@@ -157,12 +159,12 @@ pub const renderSystem = struct {
             const offset: zvkw.zvk.VkDeviceSize = 0;
             zvkw.zvk.vkCmdBindVertexBuffers(cb, 0, 1, &gpu_mesh.vertexBuffer, &offset);
             zvkw.zvk.vkCmdBindIndexBuffer(cb, gpu_mesh.indexBuffer, 0, zvkw.zvk.VK_INDEX_TYPE_UINT32);
-            const pushData = zvkw.shaderData{
-                .projection = matrices.projection,
-                .view = matrices.view,
+            const pc = zvkw.pushConstants{
                 .model = transformToMatrix(transform),
+                .textureIndex = if (registry.get(components.TextureComponent, entity_id)) |tc| tc.textureIndex else 0,
             };
-            zvkw.zvk.vkCmdPushConstants(cb, zvkw.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.shaderData), @ptrCast(&pushData));
+
+            zvkw.zvk.vkCmdPushConstants(cb, zvkw.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.pushConstants), @ptrCast(&pc));
             zvkw.zvk.vkCmdDrawIndexed(cb, gpu_mesh.indexCount, 1, 0, 0, 0);
         }
     }
@@ -176,11 +178,26 @@ pub const renderSystem = struct {
     }
 };
 fn transformToMatrix(transform: *const components.TransformComponent) [4][4]f32 {
-    // placeholder — identity with translation only for now
+    const toRad = std.math.pi / 180.0;
+    const pitch = transform.rotation[0] * toRad;
+    const yaw = transform.rotation[1] * toRad;
+    const roll = transform.rotation[2] * toRad;
+
+    const cx = @cos(pitch);
+    const sx = @sin(pitch);
+    const cy = @cos(yaw);
+    const sy = @sin(yaw);
+    const cz = @cos(roll);
+    const sz = @sin(roll);
+
+    const sx_s = transform.scale[0];
+    const sy_s = transform.scale[1];
+    const sz_s = transform.scale[2];
+
     return [4][4]f32{
-        .{ transform.scale[0], 0.0, 0.0, 0.0 },
-        .{ 0.0, transform.scale[1], 0.0, 0.0 },
-        .{ 0.0, 0.0, transform.scale[2], 0.0 },
+        .{ sx_s * (cy * cz), sy_s * (cy * sz), sz_s * (-sy), 0.0 },
+        .{ sx_s * (sx * sy * cz - cx * sz), sy_s * (sx * sy * sz + cx * cz), sz_s * (sx * cy), 0.0 },
+        .{ sx_s * (cx * sy * cz + sx * sz), sy_s * (cx * sy * sz - sx * cz), sz_s * (cx * cy), 0.0 },
         .{ transform.position[0], transform.position[1], transform.position[2], 1.0 },
     };
 }

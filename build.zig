@@ -102,6 +102,10 @@ pub fn build(b: *std.Build) void {
     // step). By default the install prefix is `zig-out/` but can be overridden
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
+    exe.root_module.addCSourceFile(.{ .file = b.path("src/cgltf_impl.c") });
+    exe.root_module.addCSourceFile(.{ .file = b.path("src/stb_image_impl.c") });
+    exe.root_module.addIncludePath(b.path("vendor/cgltf/"));
+    exe.root_module.addIncludePath(b.path("vendor/stb/"));
     exe.root_module.addIncludePath(b.path("../../../VulkanSDK/1.4.341.1/Include/"));
     exe.root_module.addIncludePath(b.path("libs/vma/"));
     exe.root_module.addLibraryPath(b.path("libs/glfw/lib/"));
