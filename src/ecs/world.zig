@@ -6,11 +6,10 @@ const scomponent = @import("../ecs/Component/SystemComponents.zig");
 const systems = @import("System/systems.zig");
 const mshLoader = @import("../meshLoader.zig");
 
-var duck: Entity = .{};
-var camera: Entity = .{};
-
 pub const World = struct {
     entity: Entity = .{},
+    camera: Entity = .{},
+    duck: Entity = .{},
     registry: Registry = undefined,
     world_allocator: std.mem.Allocator = undefined,
     window: scomponent.WindowComponent = .{ .Window_title = "ZVulkan Window", .Window_width = 800, .Window_height = 600 },
@@ -23,24 +22,24 @@ pub const World = struct {
         std.log.info("Created World Entity: {d}", .{self.entity.index});
         std.log.info("World Created ", .{});
         try self.initVulkan(self.window.Window_title, self.window.Window_width, self.window.Window_height);
-        camera = self.registry.createEntity();
-        try self.registry.attach(camera, component.CameraComponent{});
-        duck = self.registry.createEntity();
+        self.camera = self.registry.createEntity();
+        try self.registry.attach(self.camera, component.CameraComponent{});
+        self.duck = self.registry.createEntity();
         const gltfResult = try mshLoader.loadgltf(self.world_allocator, "assets/duck/scene.gltf");
         const textureIndex = try systems.renderer.uploadTexture(gltfResult.pixels, gltfResult.width, gltfResult.height);
         self.world_allocator.free(gltfResult.pixels);
-        try self.registry.attach(duck, gltfResult.mesh);
-        try self.registry.attach(duck, component.TransformComponent{
+        try self.registry.attach(self.duck, gltfResult.mesh);
+        try self.registry.attach(self.duck, component.TransformComponent{
             .position = .{ 0.0, -100.0, -550.0 },
             .rotation = .{ 0.0, -120.0, 0.0 },
             .scale = .{ 1.0, 1.0, 1.0 },
         });
-        try self.registry.attach(duck, component.TextureComponent{ .textureIndex = textureIndex });
+        try self.registry.attach(self.duck, component.TextureComponent{ .textureIndex = textureIndex });
     }
     pub fn deinit(self: *World) void {
         systems.renderer.deinit();
-        self.registry.destroyEntity(camera);
-        self.registry.destroyEntity(duck);
+        self.registry.destroyEntity(self.camera);
+        self.registry.destroyEntity(self.duck);
         self.registry.destroyEntity(self.entity);
         std.log.info("World Destroyed", .{});
         std.log.info("Engine running with {d} entities before shutdown", .{self.registry.aliveCount()});
