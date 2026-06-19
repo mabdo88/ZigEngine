@@ -37,7 +37,7 @@ fn perspective(fov: f32, near: f32, far: f32) [4][4]f32 {
     const tanHalfFov = std.math.tan(fov / 2.0);
     return [4][4]f32{
         .{ 1.0 / (aspect * tanHalfFov), 0.0, 0.0, 0.0 },
-        .{ 0.0, 1.0 / tanHalfFov, 0.0, 0.0 },
+        .{ 0.0, -1.0 / tanHalfFov, 0.0, 0.0 },
         .{ 0.0, 0.0, far / (near - far), -1.0 },
         .{ 0.0, 0.0, -(far * near) / (far - near), 0.0 },
     };

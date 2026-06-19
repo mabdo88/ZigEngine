@@ -63,6 +63,12 @@ pub const Registry = struct {
         self.generations.items[index] += 1; // Increment generation to invalidate old references
         self.freeList.append(self.registry_allocator, index) catch unreachable; // Add index back to free list
         inline for (0..self.storage.len) |i| {
+            const C = @TypeOf(self.storage[i]).ComponentType;
+            if (@hasDecl(C, "deinit")) {
+                if (self.storage[i].get(entity)) |component| {
+                    component.deinit(self.registry_allocator);
+                }
+            }
             self.storage[i].remove(entity) catch {};
         }
     }
@@ -257,4 +263,36 @@ test "query entities with mesh and transform" {
         try std.testing.expectEqual(entity1.index, entity_id);
     }
     try std.testing.expectEqual(@as(u32, 1), count);
+}
+test "entity recycling produces different mesh pointers" {
+    var reg: Registry = .{};
+    reg.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const vertsA = [_]components.Vertex{
+        .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+    };
+    const vertsB = [_]components.Vertex{
+        .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 } },
+    };
+    const idx = [_]u32{0};
+
+    const e1 = reg.createEntity();
+    try reg.attach(e1, components.MeshComponent{ .vertices = &vertsA, .indices = &idx });
+
+    const mesh1 = reg.get(components.MeshComponent, e1.index).?;
+    const ptr1 = mesh1.vertices.ptr;
+
+    reg.destroyEntity(e1);
+
+    const e2 = reg.createEntity();
+    try std.testing.expectEqual(e1.index, e2.index); // same index, recycled
+    try std.testing.expect(e1.generation != e2.generation); // different generation
+
+    try reg.attach(e2, components.MeshComponent{ .vertices = &vertsB, .indices = &idx });
+
+    const mesh2 = reg.get(components.MeshComponent, e2.index).?;
+    const ptr2 = mesh2.vertices.ptr;
+
+    try std.testing.expect(ptr1 != ptr2); // different mesh data -> different pointer
 }

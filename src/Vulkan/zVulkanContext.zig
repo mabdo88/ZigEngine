@@ -42,6 +42,14 @@ pub var imageAcquiredSemaphores: [max_frames_in_flight]zvk.VkSemaphore = undefin
 pub var renderCompleteSemaphores: []zvk.VkSemaphore = undefined;
 pub var vBufferAllocation: vma.VmaAllocation = null;
 pub var vBuffer: zvk.VkBuffer = null;
+pub var bindlessDescriptorSetLayout: zvk.VkDescriptorSetLayout = null;
+pub var bindlessDescriptorSet: zvk.VkDescriptorSet = null;
+pub var uboDescriptorSetLayout: zvk.VkDescriptorSetLayout = null;
+pub var uboDescriptorSets: [max_frames_in_flight]zvk.VkDescriptorSet = undefined;
+pub var bindlessSampler: zvk.VkSampler = null;
+pub var descriptorPool: zvk.VkDescriptorPool = null;
+pub const TextureHandle: type = u32;
+pub const MAX_TEXTURES: u32 = 1024;
 pub const shaderData = struct {
     projection: [4][4]f32,
     view: [4][4]f32,
@@ -59,6 +67,22 @@ pub const shaderDataBuffer = struct {
 pub var shaderDataBuffers: [max_frames_in_flight]shaderDataBuffer = undefined;
 pub const Vertex = struct {
     pos: @Vector(3, f32),
-    color: @Vector(3, f32),
-    //uv: @Vector(2, f32),
+    normal: @Vector(3, f32),
+    uv: @Vector(2, f32),
 };
+pub const pushConstants = struct {
+    model: [4][4]f32,
+    textureIndex: u32,
+    pad: [3]u32 = .{ 0, 0, 0 },
+};
+pub const FrameUBO = struct {
+    projection: [4][4]f32,
+    view: [4][4]f32,
+};
+pub const TextureSlot = struct {
+    image: zvk.VkImage = null,
+    view: zvk.VkImageView = null,
+    allocation: vma.VmaAllocation = null,
+};
+pub var textureSlots: [MAX_TEXTURES]TextureSlot = undefined;
+pub var textureCount: u32 = 0;

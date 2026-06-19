@@ -4,8 +4,9 @@ const Entity = @import("Entity/entity.zig").Entity;
 const component = @import("Component/components.zig");
 const scomponent = @import("../ecs/Component/SystemComponents.zig");
 const systems = @import("System/systems.zig");
+const mshLoader = @import("../meshLoader.zig");
 
-var triangle: Entity = .{};
+var duck: Entity = .{};
 var camera: Entity = .{};
 
 pub const World = struct {
@@ -24,24 +25,22 @@ pub const World = struct {
         try self.initVulkan(self.window.Window_title, self.window.Window_width, self.window.Window_height);
         camera = self.registry.createEntity();
         try self.registry.attach(camera, component.CameraComponent{});
-        triangle = self.registry.createEntity();
-        const verts = [_]component.Vertex{
-            .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
-            .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
-            .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
-        };
-        const idx = [_]u32{ 0, 1, 2 };
-        try self.registry.attach(triangle, component.MeshComponent{ .vertices = &verts, .indices = &idx });
-        try self.registry.attach(triangle, component.TransformComponent{
-            .position = .{ 0.0, 0.0, -2.0 },
-            .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+        duck = self.registry.createEntity();
+        const gltfResult = try mshLoader.loadgltf(self.world_allocator, "assets/duck/scene.gltf");
+        const textureIndex = try systems.renderer.uploadTexture(gltfResult.pixels, gltfResult.width, gltfResult.height);
+        self.world_allocator.free(gltfResult.pixels);
+        try self.registry.attach(duck, gltfResult.mesh);
+        try self.registry.attach(duck, component.TransformComponent{
+            .position = .{ 0.0, -100.0, -550.0 },
+            .rotation = .{ 0.0, -120.0, 0.0 },
             .scale = .{ 1.0, 1.0, 1.0 },
         });
+        try self.registry.attach(duck, component.TextureComponent{ .textureIndex = textureIndex });
     }
     pub fn deinit(self: *World) void {
         systems.renderer.deinit();
         self.registry.destroyEntity(camera);
-        self.registry.destroyEntity(triangle);
+        self.registry.destroyEntity(duck);
         self.registry.destroyEntity(self.entity);
         std.log.info("World Destroyed", .{});
         std.log.info("Engine running with {d} entities before shutdown", .{self.registry.aliveCount()});
