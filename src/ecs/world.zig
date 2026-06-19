@@ -13,7 +13,7 @@ pub const World = struct {
     entity: Entity = .{},
     registry: Registry = undefined,
     world_allocator: std.mem.Allocator = undefined,
-    window: scomponent.WindowComponent = .{ .Window_title = "ZVulkan Window", .Window_width = 800, .Window_height = 600 },
+    window: scomponent.WindowComponent = .{ .title = "ZVulkan Window", .width = 800, .height = 600 },
     renderer: scomponent.VulkanContextComponent = .{},
     pub fn init(self: *World, allocator: std.mem.Allocator) !void {
         std.log.info("Initializing World...", .{});
@@ -22,7 +22,7 @@ pub const World = struct {
         self.entity = self.registry.createEntity();
         std.log.info("Created World Entity: {d}", .{self.entity.index});
         std.log.info("World Created ", .{});
-        try self.initVulkan(self.window.Window_title, self.window.Window_width, self.window.Window_height);
+        try self.initVulkan(self.window.title, self.window.width, self.window.height);
         camera = self.registry.createEntity();
         try self.registry.attach(camera, component.CameraComponent{});
         duck = self.registry.createEntity();
