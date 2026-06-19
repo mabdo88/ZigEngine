@@ -8,6 +8,12 @@ const zvkw = @import("zVulkanContext.zig");
 pub var renderSystem: rs = undefined;
 pub var registry: *rgstry.Registry = undefined;
 
+/// Turns a VkResult into a Zig error so failed calls surface immediately at the
+/// source instead of causing undefined behavior later.
+fn check(result: zvkw.zvk.VkResult) !void {
+    if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
+}
+
 pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry) !void {
     zvkw.ctx.zallocator = zig_allocator;
     registry = reg;
@@ -385,7 +391,7 @@ fn recreateSwapchain() !void {
     _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &surfaceCaps);
     if (surfaceCaps.currentExtent.width == 0 or surfaceCaps.currentExtent.height == 0) return;
 
-    _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
+    try check(zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device));
 
     // Tear down the old swapchain-dependent resources. Each slice/handle is
     // cleared right after release so that if a step below fails, deinit (which
@@ -531,7 +537,7 @@ fn createCommandPool() !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.AllocateCommandBuffersFailed;
 }
 pub fn render(matrices: cs.CameraMatrices) !void {
-    _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
+    try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
 
     // Window-driven resize: not all WSI platforms report VK_ERROR_OUT_OF_DATE_KHR
     // on resize, so rebuild eagerly when the window reported a size change.
@@ -550,7 +556,7 @@ pub fn render(matrices: cs.CameraMatrices) !void {
     }
     // Only reset the fence once we know we'll submit work that signals it,
     // otherwise an early return above would leave it unsignaled and deadlock.
-    _ = zvkw.zvk.vkResetFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex]);
+    try check(zvkw.zvk.vkResetFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex]));
 
     const uboData = zvkw.FrameUBO{
         .projection = matrices.projection,
@@ -558,13 +564,13 @@ pub fn render(matrices: cs.CameraMatrices) !void {
     };
     @memcpy(@as([*]u8, @ptrCast(zvkw.ctx.shaderDataBuffers[zvkw.ctx.frameIndex].allocInfo.pMappedData.?))[0..@sizeOf(zvkw.FrameUBO)], std.mem.asBytes(&uboData));
     const cb = zvkw.ctx.commandBuffers[zvkw.ctx.frameIndex];
-    _ = zvkw.zvk.vkResetCommandBuffer(cb, 0);
+    try check(zvkw.zvk.vkResetCommandBuffer(cb, 0));
 
     const cbBI = zvkw.zvk.VkCommandBufferBeginInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    _ = zvkw.zvk.vkBeginCommandBuffer(cb, &cbBI);
+    try check(zvkw.zvk.vkBeginCommandBuffer(cb, &cbBI));
 
     const outputBarriers = [2]zvkw.zvk.VkImageMemoryBarrier2{
         .{
@@ -658,7 +664,7 @@ pub fn render(matrices: cs.CameraMatrices) !void {
         .pImageMemoryBarriers = &barrierPresent,
     };
     zvkw.zvk.vkCmdPipelineBarrier2(cb, &barrierPresentDependencyInfo);
-    _ = zvkw.zvk.vkEndCommandBuffer(cb);
+    try check(zvkw.zvk.vkEndCommandBuffer(cb));
 
     const waitStages: zvkw.zvk.VkPipelineStageFlags = zvkw.zvk.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     const submitInfo = zvkw.zvk.VkSubmitInfo{
@@ -671,7 +677,7 @@ pub fn render(matrices: cs.CameraMatrices) !void {
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &zvkw.ctx.renderCompleteSemaphores[zvkw.ctx.imageIndex],
     };
-    _ = zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, zvkw.ctx.fences[zvkw.ctx.frameIndex]);
+    try check(zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, zvkw.ctx.fences[zvkw.ctx.frameIndex]));
 
     const presentInfo = zvkw.zvk.VkPresentInfoKHR{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -953,7 +959,7 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    _ = zvkw.zvk.vkBeginCommandBuffer(cb, &beginInfo);
+    try check(zvkw.zvk.vkBeginCommandBuffer(cb, &beginInfo));
     const toTransferBarrier = zvkw.zvk.VkImageMemoryBarrier2{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_NONE,
@@ -1014,14 +1020,14 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
         .pImageMemoryBarriers = &toShaderBarrier,
     };
     zvkw.zvk.vkCmdPipelineBarrier2(cb, &toShaderDep);
-    _ = zvkw.zvk.vkEndCommandBuffer(cb);
+    try check(zvkw.zvk.vkEndCommandBuffer(cb));
     const submitInfo = zvkw.zvk.VkSubmitInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cb,
     };
-    _ = zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, null);
-    _ = zvkw.zvk.vkQueueWaitIdle(zvkw.ctx.queue);
+    try check(zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, null));
+    try check(zvkw.zvk.vkQueueWaitIdle(zvkw.ctx.queue));
     const viewCI = zvkw.zvk.VkImageViewCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = zvkw.ctx.textureSlots[slot].image,
