@@ -337,6 +337,10 @@ pub fn createSwapchain() !void {
         .compositeAlpha = zvkw.zvk.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = zvkw.zvk.VK_PRESENT_MODE_FIFO_KHR,
         .clipped = zvkw.zvk.VK_TRUE,
+        // null at first init; on recreate this is the retiring swapchain, which
+        // some drivers (e.g. Windows) require to create a new one for a surface
+        // that still owns one.
+        .oldSwapchain = zvkw.ctx.swapChain,
     };
     var result = zvkw.zvk.vkCreateSwapchainKHR(zvkw.ctx.m_Device, &swapchainCI, null, &zvkw.ctx.swapChain);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateSwapchainFailed;
@@ -383,19 +387,28 @@ fn recreateSwapchain() !void {
 
     _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
 
-    // Tear down the old swapchain-dependent resources.
+    // Tear down the old swapchain-dependent resources. Each slice/handle is
+    // cleared right after release so that if a step below fails, deinit (which
+    // walks these) won't touch freed memory or double-destroy.
     for (zvkw.ctx.swapChainImageViews) |view| {
         zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, view, null);
     }
     zvkw.ctx.zallocator.free(zvkw.ctx.swapChainImageViews);
+    zvkw.ctx.swapChainImageViews = &.{};
     zvkw.ctx.zallocator.free(zvkw.ctx.swapChainImages);
+    zvkw.ctx.swapChainImages = &.{};
     zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.depthImageView, null);
+    zvkw.ctx.depthImageView = null;
     zvkw.vma.vmaDestroyImage(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.depthImage), zvkw.ctx.depthImageAllocation);
+    zvkw.ctx.depthImage = null;
     for (zvkw.ctx.renderCompleteSemaphores) |semaphore| {
         zvkw.zvk.vkDestroySemaphore(zvkw.ctx.m_Device, semaphore, null);
     }
     zvkw.ctx.zallocator.free(zvkw.ctx.renderCompleteSemaphores);
+    zvkw.ctx.renderCompleteSemaphores = &.{};
 
+    // createSwapchain reads ctx.swapChain as VkSwapchainCreateInfoKHR.oldSwapchain,
+    // then overwrites it with the new handle; capture the old one to destroy after.
     const oldSwapchain = zvkw.ctx.swapChain;
     try createSwapchain();
     zvkw.zvk.vkDestroySwapchainKHR(zvkw.ctx.m_Device, oldSwapchain, null);
