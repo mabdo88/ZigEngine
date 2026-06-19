@@ -21527,6 +21527,7 @@ const Win32Window = struct {
     width: u32,
     height: u32,
     should_close: bool = false,
+    resized: bool = false,
 };
 
 const XlibWindow = struct {
@@ -21536,6 +21537,7 @@ const XlibWindow = struct {
     width: u32,
     height: u32,
     should_close: bool = false,
+    resized: bool = false,
 };
 
 // ─── Win32 bindings ───────────────────────────────────────────────────────────
@@ -21615,8 +21617,13 @@ fn wndProc(hwnd: win32.HWND, msg: u32, wParam: usize, lParam: isize) callconv(.c
         },
         WM_SIZE => {
             if (g_window) |w| {
-                w.width = @intCast(lParam & 0xFFFF);
-                w.height = @intCast((lParam >> 16) & 0xFFFF);
+                const new_width: u32 = @intCast(lParam & 0xFFFF);
+                const new_height: u32 = @intCast((lParam >> 16) & 0xFFFF);
+                if (new_width != w.width or new_height != w.height) {
+                    w.width = new_width;
+                    w.height = new_height;
+                    w.resized = true;
+                }
             }
             return 0;
         },
@@ -21677,6 +21684,28 @@ const XEvent = extern union {
     pad: [24]c_long,
 };
 
+const XSizeHints = extern struct {
+    flags: c_long,
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+    min_width: c_int,
+    min_height: c_int,
+    max_width: c_int,
+    max_height: c_int,
+    width_inc: c_int,
+    height_inc: c_int,
+    min_aspect: extern struct { x: c_int, y: c_int },
+    max_aspect: extern struct { x: c_int, y: c_int },
+    base_width: c_int,
+    base_height: c_int,
+    win_gravity: c_int,
+};
+
+const PMinSize: c_long = 1 << 4;
+const PMaxSize: c_long = 1 << 5;
+
 extern "X11" fn XOpenDisplay(name: ?[*:0]const u8) callconv(.c) ?*Display;
 extern "X11" fn XCloseDisplay(display: *Display) callconv(.c) c_int;
 extern "X11" fn XDefaultScreen(display: *Display) callconv(.c) c_int;
@@ -21699,6 +21728,7 @@ extern "X11" fn XSelectInput(display: *Display, w: XID, event_mask: c_long) call
 extern "X11" fn XMapWindow(display: *Display, w: XID) callconv(.c) c_int;
 extern "X11" fn XInternAtom(display: *Display, atom_name: [*:0]const u8, only_if_exists: c_int) callconv(.c) Atom;
 extern "X11" fn XSetWMProtocols(display: *Display, w: XID, protocols: [*]Atom, count: c_int) callconv(.c) c_int;
+extern "X11" fn XSetWMNormalHints(display: *Display, w: XID, hints: *XSizeHints) callconv(.c) void;
 extern "X11" fn XPending(display: *Display) callconv(.c) c_int;
 extern "X11" fn XNextEvent(display: *Display, event_return: *XEvent) callconv(.c) c_int;
 extern "X11" fn XDestroyWindow(display: *Display, w: XID) callconv(.c) c_int;
@@ -21777,6 +21807,17 @@ pub fn vkCreateWindow(info: VkWindowCreateInfo, window: *VkWindow) !void {
         _ = XStoreName(dpy, win, info.title.ptr);
         _ = XSelectInput(dpy, win, KeyPressMask | ExposureMask | StructureNotifyMask);
 
+        if (!info.resizable) {
+            // Lock the window to a fixed size by pinning min == max in the WM hints.
+            var hints = std.mem.zeroes(XSizeHints);
+            hints.flags = PMinSize | PMaxSize;
+            hints.min_width = @intCast(info.width);
+            hints.max_width = @intCast(info.width);
+            hints.min_height = @intCast(info.height);
+            hints.max_height = @intCast(info.height);
+            XSetWMNormalHints(dpy, win, &hints);
+        }
+
         const wm_delete = XInternAtom(dpy, "WM_DELETE_WINDOW", 0);
         var protocols = [_]Atom{wm_delete};
         _ = XSetWMProtocols(dpy, win, &protocols, 1);
@@ -21810,6 +21851,17 @@ pub fn vkWindowShouldClose(window: *const VkWindow) bool {
     return window.should_close;
 }
 
+/// Returns true if the window was resized since the flag was last cleared.
+/// The renderer polls this to trigger a swapchain rebuild, since relying solely
+/// on VK_ERROR_OUT_OF_DATE_KHR is not reliable across all WSI platforms.
+pub fn vkWindowResized(window: *const VkWindow) bool {
+    return window.resized;
+}
+
+pub fn vkResetWindowResizedFlag(window: *VkWindow) void {
+    window.resized = false;
+}
+
 pub fn vkPollEvents() void {
     if (builtin.os.tag == .windows) {
         var msg: MSG = undefined;
@@ -21829,8 +21881,13 @@ pub fn vkPollEvents() void {
                     }
                 },
                 ConfigureNotify => {
-                    w.width = @intCast(ev.xconfigure.width);
-                    w.height = @intCast(ev.xconfigure.height);
+                    const new_width: u32 = @intCast(ev.xconfigure.width);
+                    const new_height: u32 = @intCast(ev.xconfigure.height);
+                    if (new_width != w.width or new_height != w.height) {
+                        w.width = new_width;
+                        w.height = new_height;
+                        w.resized = true;
+                    }
                 },
                 else => {},
             }

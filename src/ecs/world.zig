@@ -53,7 +53,7 @@ pub const World = struct {
         std.log.info("World running with {d} entities", .{self.registry.aliveCount()});
         while (!systems.renderer.shouldClose()) {
             systems.renderer.pollEvents();
-            const matrices = systems.camera.update(&self.registry);
+            const matrices = systems.camera.update(&self.registry, systems.renderer.aspectRatio());
             try systems.renderer.render(matrices.?);
         }
     }
