@@ -6,9 +6,9 @@ pub const SystemComponent = union(enum) {
 };
 
 pub const WindowComponent = struct {
-    Window_width: u16 = 0,
-    Window_height: u16 = 0,
-    Window_title: ?[:0]const u8 = null,
+    width: u16 = 0,
+    height: u16 = 0,
+    title: ?[:0]const u8 = null,
 };
 
 pub const VulkanContextComponent = struct {};

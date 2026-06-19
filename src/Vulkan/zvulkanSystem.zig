@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const rgstry = @import("../ecs/Storage/registry.zig");
-const rs = @import("../ecs/System/renderSystem.zig").renderSystem;
+const rs = @import("../ecs/System/renderSystem.zig").RenderSystem;
 const cs = @import("../ecs/System/cameraSystem.zig");
 const zvkw = @import("zVulkanContext.zig");
 
@@ -702,7 +702,7 @@ fn createPipeline() !void {
     const pushConstantRange = zvkw.zvk.VkPushConstantRange{
         .stageFlags = zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
         .offset = 0,
-        .size = @sizeOf(zvkw.pushConstants), // VkDeviceAddress
+        .size = @sizeOf(zvkw.PushConstants), // VkDeviceAddress
     };
     const setLayouts = [2]zvkw.zvk.VkDescriptorSetLayout{
         zvkw.uboDescriptorSetLayout,

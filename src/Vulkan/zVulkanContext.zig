@@ -50,27 +50,27 @@ pub var bindlessSampler: zvk.VkSampler = null;
 pub var descriptorPool: zvk.VkDescriptorPool = null;
 pub const TextureHandle: type = u32;
 pub const MAX_TEXTURES: u32 = 1024;
-pub const shaderData = struct {
+pub const ShaderData = struct {
     projection: [4][4]f32,
     view: [4][4]f32,
     model: [4][4]f32,
     //lightPos: @Vector(4, f32) = @Vector(4, f32){ 0.0, -10.0, 10.0, 0.0 },
     //selected: u32 = 1,
 };
-pub const shaderDataBuffer = struct {
+pub const ShaderDataBuffer = struct {
     buffer: zvk.VkBuffer = null,
     allocation: vma.VmaAllocation = null,
     allocInfo: vma.VmaAllocationInfo = undefined,
     deviceAddress: zvk.VkDeviceAddress = 0,
     //image: zvk.VkImage = null,
 };
-pub var shaderDataBuffers: [max_frames_in_flight]shaderDataBuffer = undefined;
+pub var shaderDataBuffers: [max_frames_in_flight]ShaderDataBuffer = undefined;
 pub const Vertex = struct {
     pos: @Vector(3, f32),
     normal: @Vector(3, f32),
     uv: @Vector(2, f32),
 };
-pub const pushConstants = struct {
+pub const PushConstants = struct {
     model: [4][4]f32,
     textureIndex: u32,
     pad: [3]u32 = .{ 0, 0, 0 },

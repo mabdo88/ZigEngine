@@ -12,7 +12,7 @@ pub const World = struct {
     duck: Entity = .{},
     registry: Registry = undefined,
     world_allocator: std.mem.Allocator = undefined,
-    window: scomponent.WindowComponent = .{ .Window_title = "ZVulkan Window", .Window_width = 800, .Window_height = 600 },
+    window: scomponent.WindowComponent = .{ .title = "ZVulkan Window", .width = 800, .height = 600 },
     renderer: scomponent.VulkanContextComponent = .{},
     pub fn init(self: *World, allocator: std.mem.Allocator) !void {
         std.log.info("Initializing World...", .{});
