@@ -15,7 +15,7 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
         .title = title.?,
         .width = WWidth,
         .height = WHeight,
-        .resizable = false,
+        .resizable = true,
     };
     try zvkw.zvk.vkCreateWindow(windowCI, &zvkw.ctx.m_window);
     _ = zvkw.zvk.vkGetRequiredInstanceExtensions(&zvkw.ctx.extensions);
@@ -519,6 +519,13 @@ fn createCommandPool() !void {
 }
 pub fn render(matrices: cs.CameraMatrices) !void {
     _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
+
+    // Window-driven resize: not all WSI platforms report VK_ERROR_OUT_OF_DATE_KHR
+    // on resize, so rebuild eagerly when the window reported a size change.
+    if (zvkw.zvk.vkWindowResized(&zvkw.ctx.m_window)) {
+        zvkw.zvk.vkResetWindowResizedFlag(&zvkw.ctx.m_window);
+        try recreateSwapchain();
+    }
 
     const acquireResult = zvkw.zvk.vkAcquireNextImageKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, std.math.maxInt(u64), zvkw.ctx.imageAcquiredSemaphores[zvkw.ctx.frameIndex], null, &zvkw.ctx.imageIndex);
     if (acquireResult == zvkw.zvk.VK_ERROR_OUT_OF_DATE_KHR) {
@@ -1107,4 +1114,12 @@ pub fn shouldClose() bool {
 
 pub fn pollEvents() void {
     zvkw.zvk.vkPollEvents();
+}
+
+/// Current swapchain aspect ratio (width / height), so the camera projection
+/// stays correct as the window is resized.
+pub fn aspectRatio() f32 {
+    const h = zvkw.ctx.swapChainExtent.height;
+    if (h == 0) return 1.0;
+    return @as(f32, @floatFromInt(zvkw.ctx.swapChainExtent.width)) / @as(f32, @floatFromInt(h));
 }

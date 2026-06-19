@@ -7,13 +7,13 @@ pub const CameraMatrices = struct {
     projection: [4][4]f32,
 };
 
-pub fn update(reg: *registry.Registry) ?CameraMatrices {
+pub fn update(reg: *registry.Registry, aspect: f32) ?CameraMatrices {
     var it = reg.Query(.{CameraComponent});
     while (it.next()) |entity_id| {
         const camera = reg.get(CameraComponent, entity_id).?;
         return CameraMatrices{
             .view = lookAt(camera.position, camera.target, camera.up),
-            .projection = perspective(camera.fov, camera.near, camera.far),
+            .projection = perspective(camera.fov, camera.near, camera.far, aspect),
         };
     }
     return null;
@@ -32,8 +32,7 @@ fn lookAt(eye: @Vector(3, f32), target: @Vector(3, f32), up: @Vector(3, f32)) [4
     };
 }
 
-fn perspective(fov: f32, near: f32, far: f32) [4][4]f32 {
-    const aspect = 800.0 / 600.0;
+fn perspective(fov: f32, near: f32, far: f32, aspect: f32) [4][4]f32 {
     const tanHalfFov = std.math.tan(fov / 2.0);
     return [4][4]f32{
         .{ 1.0 / (aspect * tanHalfFov), 0.0, 0.0, 0.0 },
