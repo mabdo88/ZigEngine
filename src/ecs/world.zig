@@ -18,13 +18,13 @@ pub const World = struct {
         std.log.info("Initializing World...", .{});
         self.world_allocator = allocator;
         self.registry.init(self.world_allocator);
-        self.entity = self.registry.createEntity();
+        self.entity = try self.registry.createEntity();
         std.log.info("Created World Entity: {d}", .{self.entity.index});
         std.log.info("World Created ", .{});
         try self.initVulkan(self.window.title, self.window.width, self.window.height);
-        self.camera = self.registry.createEntity();
+        self.camera = try self.registry.createEntity();
         try self.registry.attach(self.camera, component.CameraComponent{});
-        self.duck = self.registry.createEntity();
+        self.duck = try self.registry.createEntity();
         const gltfResult = try mshLoader.loadgltf(self.world_allocator, "assets/duck/scene.gltf");
         const textureIndex = try systems.renderer.uploadTexture(gltfResult.pixels, gltfResult.width, gltfResult.height);
         self.world_allocator.free(gltfResult.pixels);
@@ -38,9 +38,10 @@ pub const World = struct {
     }
     pub fn deinit(self: *World) void {
         systems.renderer.deinit();
-        self.registry.destroyEntity(self.camera);
-        self.registry.destroyEntity(self.duck);
-        self.registry.destroyEntity(self.entity);
+        // Teardown can't propagate errors; an invalid index here is a bug, so log it.
+        self.registry.destroyEntity(self.camera) catch |err| std.log.err("destroyEntity(camera) failed: {s}", .{@errorName(err)});
+        self.registry.destroyEntity(self.duck) catch |err| std.log.err("destroyEntity(duck) failed: {s}", .{@errorName(err)});
+        self.registry.destroyEntity(self.entity) catch |err| std.log.err("destroyEntity(entity) failed: {s}", .{@errorName(err)});
         std.log.info("World Destroyed", .{});
         std.log.info("Engine running with {d} entities before shutdown", .{self.registry.aliveCount()});
         self.registry.deinit();
@@ -53,7 +54,7 @@ pub const World = struct {
         std.log.info("World running with {d} entities", .{self.registry.aliveCount()});
         while (!systems.renderer.shouldClose()) {
             systems.renderer.pollEvents();
-            const matrices = systems.camera.update(&self.registry);
+            const matrices = systems.camera.update(&self.registry, systems.renderer.aspectRatio());
             try systems.renderer.render(matrices.?);
         }
     }

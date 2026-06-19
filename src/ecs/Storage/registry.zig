@@ -24,7 +24,7 @@ pub const Registry = struct {
         self.freeList = .empty;
         self.generations = .empty;
         self.registry_allocator = allocator;
-
+        self.nextEntityIndex = 0;
         self.MAX_ENTITIES = 1_000_000; // 2^24 entities
         std.log.info("Registry Online", .{});
         inline for (0..self.storage.len) |i| {
@@ -40,28 +40,28 @@ pub const Registry = struct {
 
         std.log.info("Registry Offline", .{});
     }
-    pub fn createEntity(self: *Registry) Entity {
+    pub fn createEntity(self: *Registry) !Entity {
         var entityIndex: u32 = 0;
         if (self.freeList.items.len > 0) {
             entityIndex = self.freeList.pop().?; // Reuse index from free list
         } else {
             entityIndex = self.nextEntityIndex;
-            self.nextEntityIndex += 1;
             if (entityIndex >= self.MAX_ENTITIES) {
-                std.debug.panic("Maximum number of entities reached", .{});
+                return error.MaxEntitiesReached;
             }
-            self.generations.append(self.registry_allocator, 0) catch unreachable; // Initialize generation for new entity
+            try self.generations.append(self.registry_allocator, 0); // Initialize generation for new entity
+            self.nextEntityIndex += 1;
         }
         const generation = self.generations.items[entityIndex];
         return Entity.make(entityIndex, generation);
     }
-    pub fn destroyEntity(self: *Registry, entity: Entity) void {
+    pub fn destroyEntity(self: *Registry, entity: Entity) !void {
         const index = entity.index;
         if (index >= self.generations.items.len) {
-            std.debug.panic("Invalid entity index", .{});
+            return error.InvalidEntityIndex;
         }
         self.generations.items[index] += 1; // Increment generation to invalidate old references
-        self.freeList.append(self.registry_allocator, index) catch unreachable; // Add index back to free list
+        try self.freeList.append(self.registry_allocator, index); // Add index back to free list
         inline for (0..self.storage.len) |i| {
             const C = @TypeOf(self.storage[i]).ComponentType;
             if (@hasDecl(C, "deinit")) {
@@ -84,12 +84,8 @@ pub const Registry = struct {
     pub fn attach(self: *Registry, entity: Entity, component: anytype) !void {
         if (!self.isAlive(entity)) return error.EntityIsDead;
         const T = @TypeOf(component);
-        inline for (0..self.storage.len) |i| {
-            if (T == @TypeOf(self.storage[i]).ComponentType) {
-                try self.storage[i].attachComponent(self.registry_allocator, entity, component);
-                return;
-            }
-        }
+        const idx = comptime indexOfType(T);
+        try self.storage[idx].attachComponent(self.registry_allocator, entity, component);
     }
     fn indexOfType(comptime T: type) comptime_int {
         inline for (components.AllComponents, 0..) |C, i| {
@@ -131,7 +127,7 @@ test "attach and get component" {
     reg.init(std.testing.allocator);
     defer reg.deinit();
 
-    const entity = reg.createEntity();
+    const entity = try reg.createEntity();
     const verts = [_]components.Vertex{
         .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
         .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 } },
@@ -151,7 +147,7 @@ test "attach and destroy cleans storage" {
     reg.init(std.testing.allocator);
     defer reg.deinit();
 
-    const entity = reg.createEntity();
+    const entity = try reg.createEntity();
     const verts = [_]components.Vertex{
         .{ .pos = .{ 0.0, 0.0, 0.0 }, .color = .{ 1.0, 1.0, 1.0 } },
     };
@@ -160,7 +156,7 @@ test "attach and destroy cleans storage" {
     try reg.attach(entity, components.MeshComponent{ .vertices = &verts, .indices = &idx });
     try std.testing.expect(reg.storage[0].has(entity));
 
-    reg.destroyEntity(entity);
+    try reg.destroyEntity(entity);
     try std.testing.expect(!reg.storage[0].has(entity));
     try std.testing.expect(!reg.isAlive(entity));
 }
@@ -170,7 +166,7 @@ test "attach transform component" {
     reg.init(std.testing.allocator);
     defer reg.deinit();
 
-    const entity = reg.createEntity();
+    const entity = try reg.createEntity();
     try reg.attach(entity, components.TransformComponent{
         .position = .{ 1.0, 2.0, 3.0 },
         .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
@@ -185,19 +181,19 @@ test "creation and destruction of entities one by one" {
     var test_registry: Registry = .{};
     test_registry.init(std.testing.allocator);
     defer test_registry.deinit();
-    const entity1 = test_registry.createEntity();
+    const entity1 = try test_registry.createEntity();
     std.debug.print("Entity1 Index: {d}, Generation: {d}\n", .{ entity1.index, entity1.generation });
     try std.testing.expect(test_registry.aliveCount() == 1);
-    const entity2 = test_registry.createEntity();
+    const entity2 = try test_registry.createEntity();
     std.debug.print("Entity2 Index: {d}, Generation: {d}\n", .{ entity2.index, entity2.generation });
     try std.testing.expect(test_registry.isAlive(entity1) == true);
     try std.testing.expect(test_registry.isAlive(entity2) == true);
-    test_registry.destroyEntity(entity1);
+    try test_registry.destroyEntity(entity1);
     try std.testing.expect(test_registry.isAlive(entity1) == false);
     try std.testing.expect(test_registry.aliveCount() == 1);
     std.debug.print("Entity1 Index: {d}, Generation: {d}\n", .{ entity1.index, entity1.generation });
     std.debug.print("Entity2 Index: {d}, Generation: {d}\n", .{ entity2.index, entity2.generation });
-    const entity3 = test_registry.createEntity();
+    const entity3 = try test_registry.createEntity();
     std.debug.print("Entity3 Index: {d}, Generation: {d}\n", .{ entity3.index, entity3.generation });
     try std.testing.expect(test_registry.isAlive(entity3) == true);
     try std.testing.expect(test_registry.aliveCount() == 2);
@@ -210,20 +206,20 @@ test "batch creation and destruction of entities" {
 
     var entities: [10]Entity = undefined;
     for (0..10) |i| {
-        entities[i] = test_registry.createEntity();
+        entities[i] = try test_registry.createEntity();
         std.debug.print("Created Entity Index: {d}, Generation: {d}\n", .{ entities[i].index, entities[i].generation });
     }
     try std.testing.expect(test_registry.aliveCount() == 10);
 
     for (3..8) |i| {
-        test_registry.destroyEntity(entities[i]);
+        try test_registry.destroyEntity(entities[i]);
         std.debug.print("Destroyed Entity Index: {d}, Generation: {d}\n", .{ entities[i].index, entities[i].generation });
     }
     try std.testing.expect(test_registry.aliveCount() == 5);
 
     var recycled: [5]Entity = undefined;
     for (0..5) |i| {
-        recycled[i] = test_registry.createEntity();
+        recycled[i] = try test_registry.createEntity();
         std.debug.print("Recycled Entity Index: {d}, Generation: {d}\n", .{ recycled[i].index, recycled[i].generation });
     }
     try std.testing.expect(test_registry.aliveCount() == 10);
@@ -237,8 +233,8 @@ test "query entities with mesh and transform" {
     reg.init(std.testing.allocator);
     defer reg.deinit();
 
-    const entity1 = reg.createEntity();
-    const entity2 = reg.createEntity();
+    const entity1 = try reg.createEntity();
+    const entity2 = try reg.createEntity();
 
     const verts = [_]components.Vertex{
         .{ .pos = .{ 0.0, 0.0, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
@@ -277,15 +273,15 @@ test "entity recycling produces different mesh pointers" {
     };
     const idx = [_]u32{0};
 
-    const e1 = reg.createEntity();
+    const e1 = try reg.createEntity();
     try reg.attach(e1, components.MeshComponent{ .vertices = &vertsA, .indices = &idx });
 
     const mesh1 = reg.get(components.MeshComponent, e1.index).?;
     const ptr1 = mesh1.vertices.ptr;
 
-    reg.destroyEntity(e1);
+    try reg.destroyEntity(e1);
 
-    const e2 = reg.createEntity();
+    const e2 = try reg.createEntity();
     try std.testing.expectEqual(e1.index, e2.index); // same index, recycled
     try std.testing.expect(e1.generation != e2.generation); // different generation
 

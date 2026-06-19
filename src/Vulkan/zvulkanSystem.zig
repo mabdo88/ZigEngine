@@ -8,6 +8,12 @@ const zvkw = @import("zVulkanContext.zig");
 pub var renderSystem: rs = undefined;
 pub var registry: *rgstry.Registry = undefined;
 
+/// Turns a VkResult into a Zig error so failed calls surface immediately at the
+/// source instead of causing undefined behavior later.
+fn check(result: zvkw.zvk.VkResult) !void {
+    if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
+}
+
 pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry) !void {
     zvkw.ctx.zallocator = zig_allocator;
     registry = reg;
@@ -15,7 +21,7 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
         .title = title.?,
         .width = WWidth,
         .height = WHeight,
-        .resizable = false,
+        .resizable = true,
     };
     try zvkw.zvk.vkCreateWindow(windowCI, &zvkw.ctx.m_window);
     _ = zvkw.zvk.vkGetRequiredInstanceExtensions(&zvkw.ctx.extensions);
@@ -316,10 +322,15 @@ pub fn createSwapchain() !void {
     else
         surfaceCaps.currentExtent;
     zvkw.ctx.swapChainExtent = swapchainExtent;
+    // maxImageCount == 0 means "no upper limit", so only clamp when it is set.
+    var desiredImageCount = surfaceCaps.minImageCount + 1;
+    if (surfaceCaps.maxImageCount > 0 and desiredImageCount > surfaceCaps.maxImageCount) {
+        desiredImageCount = surfaceCaps.maxImageCount;
+    }
     const swapchainCI = zvkw.zvk.VkSwapchainCreateInfoKHR{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = zvkw.ctx.m_surface,
-        .minImageCount = @min(surfaceCaps.minImageCount + 1, surfaceCaps.maxImageCount),
+        .minImageCount = desiredImageCount,
         .imageFormat = zvkw.ctx.colorFormat,
         .imageColorSpace = zvkw.ctx.colorSpace,
         .imageExtent = swapchainExtent,
@@ -332,6 +343,10 @@ pub fn createSwapchain() !void {
         .compositeAlpha = zvkw.zvk.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = zvkw.zvk.VK_PRESENT_MODE_FIFO_KHR,
         .clipped = zvkw.zvk.VK_TRUE,
+        // null at first init; on recreate this is the retiring swapchain, which
+        // some drivers (e.g. Windows) require to create a new one for a surface
+        // that still owns one.
+        .oldSwapchain = zvkw.ctx.swapChain,
     };
     var result = zvkw.zvk.vkCreateSwapchainKHR(zvkw.ctx.m_Device, &swapchainCI, null, &zvkw.ctx.swapChain);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateSwapchainFailed;
@@ -364,6 +379,55 @@ pub fn createSwapchain() !void {
         };
         result = zvkw.zvk.vkCreateImageView(zvkw.ctx.m_Device, &viewCI, null, &zvkw.ctx.swapChainImageViews[i]);
         if (result != zvkw.zvk.VK_SUCCESS) return error.CreateImageViewFailed;
+    }
+}
+/// Rebuilds the swapchain and everything sized to it (image views, depth image,
+/// per-image render-complete semaphores). Called when acquire/present report the
+/// surface is out of date (resize, minimize/restore, display change).
+fn recreateSwapchain() !void {
+    // A zero-area surface (e.g. minimized window) can't have a swapchain; skip
+    // until it has a real size again.
+    var surfaceCaps: zvkw.zvk.VkSurfaceCapabilitiesKHR = undefined;
+    _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &surfaceCaps);
+    if (surfaceCaps.currentExtent.width == 0 or surfaceCaps.currentExtent.height == 0) return;
+
+    try check(zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device));
+
+    // Tear down the old swapchain-dependent resources. Each slice/handle is
+    // cleared right after release so that if a step below fails, deinit (which
+    // walks these) won't touch freed memory or double-destroy.
+    for (zvkw.ctx.swapChainImageViews) |view| {
+        zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, view, null);
+    }
+    zvkw.ctx.zallocator.free(zvkw.ctx.swapChainImageViews);
+    zvkw.ctx.swapChainImageViews = &.{};
+    zvkw.ctx.zallocator.free(zvkw.ctx.swapChainImages);
+    zvkw.ctx.swapChainImages = &.{};
+    zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.depthImageView, null);
+    zvkw.ctx.depthImageView = null;
+    zvkw.vma.vmaDestroyImage(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.depthImage), zvkw.ctx.depthImageAllocation);
+    zvkw.ctx.depthImage = null;
+    for (zvkw.ctx.renderCompleteSemaphores) |semaphore| {
+        zvkw.zvk.vkDestroySemaphore(zvkw.ctx.m_Device, semaphore, null);
+    }
+    zvkw.ctx.zallocator.free(zvkw.ctx.renderCompleteSemaphores);
+    zvkw.ctx.renderCompleteSemaphores = &.{};
+
+    // createSwapchain reads ctx.swapChain as VkSwapchainCreateInfoKHR.oldSwapchain,
+    // then overwrites it with the new handle; capture the old one to destroy after.
+    const oldSwapchain = zvkw.ctx.swapChain;
+    try createSwapchain();
+    zvkw.zvk.vkDestroySwapchainKHR(zvkw.ctx.m_Device, oldSwapchain, null);
+    try createDepthImage();
+
+    // The swapchain image count can change, so recreate the per-image semaphores.
+    const semaphoreCI = zvkw.zvk.VkSemaphoreCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+    zvkw.ctx.renderCompleteSemaphores = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkSemaphore, zvkw.ctx.swapChainImages.len);
+    for (0..zvkw.ctx.swapChainImages.len) |i| {
+        const result = zvkw.zvk.vkCreateSemaphore(zvkw.ctx.m_Device, &semaphoreCI, null, &zvkw.ctx.renderCompleteSemaphores[i]);
+        if (result != zvkw.zvk.VK_SUCCESS) return error.CreateSemaphoreFailed;
     }
 }
 fn pickSurfaceFormat() zvkw.zvk.VkSurfaceFormatKHR {
@@ -473,9 +537,26 @@ fn createCommandPool() !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.AllocateCommandBuffersFailed;
 }
 pub fn render(matrices: cs.CameraMatrices) !void {
-    _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
-    _ = zvkw.zvk.vkResetFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex]);
-    _ = zvkw.zvk.vkAcquireNextImageKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, std.math.maxInt(u64), zvkw.ctx.imageAcquiredSemaphores[zvkw.ctx.frameIndex], null, &zvkw.ctx.imageIndex);
+    try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
+
+    // Window-driven resize: not all WSI platforms report VK_ERROR_OUT_OF_DATE_KHR
+    // on resize, so rebuild eagerly when the window reported a size change.
+    if (zvkw.zvk.vkWindowResized(&zvkw.ctx.m_window)) {
+        zvkw.zvk.vkResetWindowResizedFlag(&zvkw.ctx.m_window);
+        try recreateSwapchain();
+    }
+
+    const acquireResult = zvkw.zvk.vkAcquireNextImageKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, std.math.maxInt(u64), zvkw.ctx.imageAcquiredSemaphores[zvkw.ctx.frameIndex], null, &zvkw.ctx.imageIndex);
+    if (acquireResult == zvkw.zvk.VK_ERROR_OUT_OF_DATE_KHR) {
+        // Surface changed (resize/display change). Rebuild and skip this frame.
+        try recreateSwapchain();
+        return;
+    } else if (acquireResult != zvkw.zvk.VK_SUCCESS and acquireResult != zvkw.zvk.VK_SUBOPTIMAL_KHR) {
+        return error.AcquireImageFailed;
+    }
+    // Only reset the fence once we know we'll submit work that signals it,
+    // otherwise an early return above would leave it unsignaled and deadlock.
+    try check(zvkw.zvk.vkResetFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex]));
 
     const uboData = zvkw.FrameUBO{
         .projection = matrices.projection,
@@ -483,13 +564,13 @@ pub fn render(matrices: cs.CameraMatrices) !void {
     };
     @memcpy(@as([*]u8, @ptrCast(zvkw.ctx.shaderDataBuffers[zvkw.ctx.frameIndex].allocInfo.pMappedData.?))[0..@sizeOf(zvkw.FrameUBO)], std.mem.asBytes(&uboData));
     const cb = zvkw.ctx.commandBuffers[zvkw.ctx.frameIndex];
-    _ = zvkw.zvk.vkResetCommandBuffer(cb, 0);
+    try check(zvkw.zvk.vkResetCommandBuffer(cb, 0));
 
     const cbBI = zvkw.zvk.VkCommandBufferBeginInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    _ = zvkw.zvk.vkBeginCommandBuffer(cb, &cbBI);
+    try check(zvkw.zvk.vkBeginCommandBuffer(cb, &cbBI));
 
     const outputBarriers = [2]zvkw.zvk.VkImageMemoryBarrier2{
         .{
@@ -583,7 +664,7 @@ pub fn render(matrices: cs.CameraMatrices) !void {
         .pImageMemoryBarriers = &barrierPresent,
     };
     zvkw.zvk.vkCmdPipelineBarrier2(cb, &barrierPresentDependencyInfo);
-    _ = zvkw.zvk.vkEndCommandBuffer(cb);
+    try check(zvkw.zvk.vkEndCommandBuffer(cb));
 
     const waitStages: zvkw.zvk.VkPipelineStageFlags = zvkw.zvk.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     const submitInfo = zvkw.zvk.VkSubmitInfo{
@@ -596,7 +677,7 @@ pub fn render(matrices: cs.CameraMatrices) !void {
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &zvkw.ctx.renderCompleteSemaphores[zvkw.ctx.imageIndex],
     };
-    _ = zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, zvkw.ctx.fences[zvkw.ctx.frameIndex]);
+    try check(zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, zvkw.ctx.fences[zvkw.ctx.frameIndex]));
 
     const presentInfo = zvkw.zvk.VkPresentInfoKHR{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -606,7 +687,12 @@ pub fn render(matrices: cs.CameraMatrices) !void {
         .pSwapchains = &zvkw.ctx.swapChain,
         .pImageIndices = &zvkw.ctx.imageIndex,
     };
-    _ = zvkw.zvk.vkQueuePresentKHR(zvkw.ctx.queue, &presentInfo);
+    const presentResult = zvkw.zvk.vkQueuePresentKHR(zvkw.ctx.queue, &presentInfo);
+    if (presentResult == zvkw.zvk.VK_ERROR_OUT_OF_DATE_KHR or presentResult == zvkw.zvk.VK_SUBOPTIMAL_KHR) {
+        try recreateSwapchain();
+    } else if (presentResult != zvkw.zvk.VK_SUCCESS) {
+        return error.PresentImageFailed;
+    }
     zvkw.ctx.frameIndex = (zvkw.ctx.frameIndex + 1) % zvkw.max_frames_in_flight;
 }
 
@@ -824,7 +910,7 @@ fn createSampler() !void {
 }
 pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureHandle {
     const slot = zvkw.ctx.textureCount;
-    if (slot > zvkw.MAX_TEXTURES) return error.TextureHeapFull;
+    if (slot >= zvkw.MAX_TEXTURES) return error.TextureHeapFull;
     const imageSize: zvkw.zvk.VkDeviceSize = width * height * 4;
     var stagingBuffer: zvkw.zvk.VkBuffer = null;
     var stagingAllocation: zvkw.vma.VmaAllocation = null;
@@ -873,7 +959,7 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    _ = zvkw.zvk.vkBeginCommandBuffer(cb, &beginInfo);
+    try check(zvkw.zvk.vkBeginCommandBuffer(cb, &beginInfo));
     const toTransferBarrier = zvkw.zvk.VkImageMemoryBarrier2{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_NONE,
@@ -934,14 +1020,14 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
         .pImageMemoryBarriers = &toShaderBarrier,
     };
     zvkw.zvk.vkCmdPipelineBarrier2(cb, &toShaderDep);
-    _ = zvkw.zvk.vkEndCommandBuffer(cb);
+    try check(zvkw.zvk.vkEndCommandBuffer(cb));
     const submitInfo = zvkw.zvk.VkSubmitInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cb,
     };
-    _ = zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, null);
-    _ = zvkw.zvk.vkQueueWaitIdle(zvkw.ctx.queue);
+    try check(zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, null));
+    try check(zvkw.zvk.vkQueueWaitIdle(zvkw.ctx.queue));
     const viewCI = zvkw.zvk.VkImageViewCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = zvkw.ctx.textureSlots[slot].image,
@@ -1047,4 +1133,12 @@ pub fn shouldClose() bool {
 
 pub fn pollEvents() void {
     zvkw.zvk.vkPollEvents();
+}
+
+/// Current swapchain aspect ratio (width / height), so the camera projection
+/// stays correct as the window is resized.
+pub fn aspectRatio() f32 {
+    const h = zvkw.ctx.swapChainExtent.height;
+    if (h == 0) return 1.0;
+    return @as(f32, @floatFromInt(zvkw.ctx.swapChainExtent.width)) / @as(f32, @floatFromInt(h));
 }

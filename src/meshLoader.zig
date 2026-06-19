@@ -22,6 +22,8 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfLoadResul
     defer gltf.cgltf_free(data);
     result = gltf.cgltf_load_buffers(&options, data.?, path);
     if (result != gltf.cgltf_result_success) return error.gltfLoadBuffersFailed;
+    if (data.*.meshes_count == 0) return error.gltfNoMeshes;
+    if (data.*.meshes[0].primitives_count == 0) return error.gltfNoPrimitives;
     const prim = data.*.meshes[0].primitives[0];
     var pos_accessor: ?*gltf.struct_cgltf_accessor = null;
     var normal_accessor: ?*gltf.struct_cgltf_accessor = null;
@@ -48,6 +50,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfLoadResul
         _ = gltf.cgltf_accessor_read_float(uv_accessor, i, &uv, 2);
         vertices[i] = .{ .pos = .{ pos[0], pos[1], pos[2] }, .normal = .{ normal[0], normal[1], normal[2] }, .uv = .{ uv[0], uv[1] } };
     }
+    if (prim.indices == null) return error.gltfNoIndices;
     const index_count = prim.indices.*.count;
     const indices = try allocator.alloc(u32, index_count);
     for (0..index_count) |i| {

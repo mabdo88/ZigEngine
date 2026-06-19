@@ -21467,6 +21467,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const win32 = std.os.windows;
 
+// ─── Win32 surface ────────────────────────────────────────────────────────────
+
 const VkWin32SurfaceCreateInfoKHR = extern struct {
     sType: i32 = 1000009000, // VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR
     pNext: ?*const anyopaque = null,
@@ -21482,6 +21484,23 @@ extern fn vkCreateWin32SurfaceKHR(
     pSurface: *VkSurfaceKHR,
 ) VkResult;
 
+// ─── Xlib surface ───────────────────────────────────────────────────────────
+
+const VkXlibSurfaceCreateInfoKHR = extern struct {
+    sType: i32 = 1000004000, // VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR
+    pNext: ?*const anyopaque = null,
+    flags: u32 = 0,
+    dpy: *Display,
+    window: XID,
+};
+
+extern fn vkCreateXlibSurfaceKHR(
+    instance: VkInstance,
+    pCreateInfo: *const VkXlibSurfaceCreateInfoKHR,
+    pAllocator: ?*anyopaque,
+    pSurface: *VkSurfaceKHR,
+) VkResult;
+
 // ─── Window ───────────────────────────────────────────────────────────────────
 
 pub const VkWindowCreateInfo = struct {
@@ -21491,12 +21510,34 @@ pub const VkWindowCreateInfo = struct {
     resizable: bool = false,
 };
 
-pub const VkWindow = struct {
+// Platform-specific window handle, selected at compile time. The public API
+// below (vkCreateWindow/.../vkCreateWindowSurface) is identical on every OS, so
+// the renderer never sees the backend difference. To add a new backend (e.g.
+// SDL3 or Wayland) add a struct here and a branch in the functions below.
+pub const VkWindow = if (builtin.os.tag == .windows)
+    Win32Window
+else if (builtin.os.tag == .linux)
+    XlibWindow
+else
+    @compileError("VkWindow: unsupported OS (add a native backend)");
+
+const Win32Window = struct {
     hwnd: win32.HWND,
     hinstance: win32.HINSTANCE,
     width: u32,
     height: u32,
     should_close: bool = false,
+    resized: bool = false,
+};
+
+const XlibWindow = struct {
+    display: *Display,
+    window: XID,
+    wm_delete: Atom,
+    width: u32,
+    height: u32,
+    should_close: bool = false,
+    resized: bool = false,
 };
 
 // ─── Win32 bindings ───────────────────────────────────────────────────────────
@@ -21563,10 +21604,6 @@ extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(.c) void;
 extern "user32" fn LoadCursorW(hInstance: ?win32.HINSTANCE, lpCursorName: u32) callconv(.c) ?win32.HANDLE;
 extern "kernel32" fn GetModuleHandleW(lpModuleName: ?[*:0]const u16) callconv(.c) win32.HINSTANCE;
 
-// ─── Global window ptr for wndproc ────────────────────────────────────────────
-
-var g_window: ?*VkWindow = null;
-
 fn wndProc(hwnd: win32.HWND, msg: u32, wParam: usize, lParam: isize) callconv(.c) isize {
     switch (msg) {
         WM_CLOSE => {
@@ -21580,8 +21617,13 @@ fn wndProc(hwnd: win32.HWND, msg: u32, wParam: usize, lParam: isize) callconv(.c
         },
         WM_SIZE => {
             if (g_window) |w| {
-                w.width = @intCast(lParam & 0xFFFF);
-                w.height = @intCast((lParam >> 16) & 0xFFFF);
+                const new_width: u32 = @intCast(lParam & 0xFFFF);
+                const new_height: u32 = @intCast((lParam >> 16) & 0xFFFF);
+                if (new_width != w.width or new_height != w.height) {
+                    w.width = new_width;
+                    w.height = new_height;
+                    w.resized = true;
+                }
             }
             return 0;
         },
@@ -21589,60 +21631,219 @@ fn wndProc(hwnd: win32.HWND, msg: u32, wParam: usize, lParam: isize) callconv(.c
     }
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
 const class_name = std.unicode.utf8ToUtf16LeStringLiteral("VkWindowClass");
 
+// ─── Xlib bindings ────────────────────────────────────────────────────────────
+
+const Display = opaque {};
+const XID = c_ulong; // Window / Drawable
+const Atom = c_ulong;
+
+const KeyPressMask: c_long = 1 << 0;
+const ExposureMask: c_long = 1 << 15;
+const StructureNotifyMask: c_long = 1 << 17;
+
+const ClientMessage: c_int = 33;
+const ConfigureNotify: c_int = 22;
+
+const XClientMessageEvent = extern struct {
+    type: c_int,
+    serial: c_ulong,
+    send_event: c_int,
+    display: ?*Display,
+    window: XID,
+    message_type: Atom,
+    format: c_int,
+    data: extern union {
+        b: [20]u8,
+        s: [10]c_short,
+        l: [5]c_long,
+    },
+};
+
+const XConfigureEvent = extern struct {
+    type: c_int,
+    serial: c_ulong,
+    send_event: c_int,
+    display: ?*Display,
+    event: XID,
+    window: XID,
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+    border_width: c_int,
+    above: XID,
+    override_redirect: c_int,
+};
+
+const XEvent = extern union {
+    type: c_int,
+    xclient: XClientMessageEvent,
+    xconfigure: XConfigureEvent,
+    pad: [24]c_long,
+};
+
+const XSizeHints = extern struct {
+    flags: c_long,
+    x: c_int,
+    y: c_int,
+    width: c_int,
+    height: c_int,
+    min_width: c_int,
+    min_height: c_int,
+    max_width: c_int,
+    max_height: c_int,
+    width_inc: c_int,
+    height_inc: c_int,
+    min_aspect: extern struct { x: c_int, y: c_int },
+    max_aspect: extern struct { x: c_int, y: c_int },
+    base_width: c_int,
+    base_height: c_int,
+    win_gravity: c_int,
+};
+
+const PMinSize: c_long = 1 << 4;
+const PMaxSize: c_long = 1 << 5;
+
+extern "X11" fn XOpenDisplay(name: ?[*:0]const u8) callconv(.c) ?*Display;
+extern "X11" fn XCloseDisplay(display: *Display) callconv(.c) c_int;
+extern "X11" fn XDefaultScreen(display: *Display) callconv(.c) c_int;
+extern "X11" fn XDefaultRootWindow(display: *Display) callconv(.c) XID;
+extern "X11" fn XBlackPixel(display: *Display, screen: c_int) callconv(.c) c_ulong;
+extern "X11" fn XWhitePixel(display: *Display, screen: c_int) callconv(.c) c_ulong;
+extern "X11" fn XCreateSimpleWindow(
+    display: *Display,
+    parent: XID,
+    x: c_int,
+    y: c_int,
+    width: c_uint,
+    height: c_uint,
+    border_width: c_uint,
+    border: c_ulong,
+    background: c_ulong,
+) callconv(.c) XID;
+extern "X11" fn XStoreName(display: *Display, w: XID, name: [*:0]const u8) callconv(.c) c_int;
+extern "X11" fn XSelectInput(display: *Display, w: XID, event_mask: c_long) callconv(.c) c_int;
+extern "X11" fn XMapWindow(display: *Display, w: XID) callconv(.c) c_int;
+extern "X11" fn XInternAtom(display: *Display, atom_name: [*:0]const u8, only_if_exists: c_int) callconv(.c) Atom;
+extern "X11" fn XSetWMProtocols(display: *Display, w: XID, protocols: [*]Atom, count: c_int) callconv(.c) c_int;
+extern "X11" fn XSetWMNormalHints(display: *Display, w: XID, hints: *XSizeHints) callconv(.c) void;
+extern "X11" fn XPending(display: *Display) callconv(.c) c_int;
+extern "X11" fn XNextEvent(display: *Display, event_return: *XEvent) callconv(.c) c_int;
+extern "X11" fn XDestroyWindow(display: *Display, w: XID) callconv(.c) c_int;
+extern "X11" fn XFlush(display: *Display) callconv(.c) c_int;
+
+// ─── Global window ptr (used by the Win32 wndproc and the Xlib event pump) ─────
+
+var g_window: ?*VkWindow = null;
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
 pub fn vkCreateWindow(info: VkWindowCreateInfo, window: *VkWindow) !void {
-    const hinstance = GetModuleHandleW(null);
+    if (builtin.os.tag == .windows) {
+        const hinstance = GetModuleHandleW(null);
 
-    const wc = WNDCLASSEXW{
-        .cbSize = @sizeOf(WNDCLASSEXW),
-        .style = CS_HREDRAW | CS_VREDRAW,
-        .lpfnWndProc = wndProc,
-        .hInstance = hinstance,
-        .hCursor = LoadCursorW(null, IDC_ARROW),
-        .lpszClassName = class_name,
-    };
-    _ = RegisterClassExW(&wc);
+        const wc = WNDCLASSEXW{
+            .cbSize = @sizeOf(WNDCLASSEXW),
+            .style = CS_HREDRAW | CS_VREDRAW,
+            .lpfnWndProc = wndProc,
+            .hInstance = hinstance,
+            .hCursor = LoadCursorW(null, IDC_ARROW),
+            .lpszClassName = class_name,
+        };
+        _ = RegisterClassExW(&wc);
 
-    const style: u32 = if (info.resizable)
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE
-    else
-        (WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX)) | WS_VISIBLE;
+        const style: u32 = if (info.resizable)
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE
+        else
+            (WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX)) | WS_VISIBLE;
 
-    // Convert title to UTF-16
-    var title_buf: [256]u16 = undefined;
-    const title_len = try std.unicode.utf8ToUtf16Le(&title_buf, info.title);
-    title_buf[title_len] = 0;
+        // Convert title to UTF-16
+        var title_buf: [256]u16 = undefined;
+        const title_len = try std.unicode.utf8ToUtf16Le(&title_buf, info.title);
+        title_buf[title_len] = 0;
 
-    const hwnd = CreateWindowExW(
-        0,
-        class_name,
-        @ptrCast(&title_buf),
-        style,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        @intCast(info.width),
-        @intCast(info.height),
-        null,
-        null,
-        hinstance,
-        null,
-    ) orelse return error.VkWindowCreateFailed;
+        const hwnd = CreateWindowExW(
+            0,
+            class_name,
+            @ptrCast(&title_buf),
+            style,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            @intCast(info.width),
+            @intCast(info.height),
+            null,
+            null,
+            hinstance,
+            null,
+        ) orelse return error.VkWindowCreateFailed;
 
-    window.* = .{
-        .hwnd = hwnd,
-        .hinstance = hinstance,
-        .width = info.width,
-        .height = info.height,
-    };
+        window.* = .{
+            .hwnd = hwnd,
+            .hinstance = hinstance,
+            .width = info.width,
+            .height = info.height,
+        };
 
-    g_window = window;
+        g_window = window;
+    } else {
+        const dpy = XOpenDisplay(null) orelse return error.VkWindowCreateFailed;
+        const screen = XDefaultScreen(dpy);
+        const root = XDefaultRootWindow(dpy);
+
+        const win = XCreateSimpleWindow(
+            dpy,
+            root,
+            0,
+            0,
+            info.width,
+            info.height,
+            1,
+            XBlackPixel(dpy, screen),
+            XWhitePixel(dpy, screen),
+        );
+
+        _ = XStoreName(dpy, win, info.title.ptr);
+        _ = XSelectInput(dpy, win, KeyPressMask | ExposureMask | StructureNotifyMask);
+
+        if (!info.resizable) {
+            // Lock the window to a fixed size by pinning min == max in the WM hints.
+            var hints = std.mem.zeroes(XSizeHints);
+            hints.flags = PMinSize | PMaxSize;
+            hints.min_width = @intCast(info.width);
+            hints.max_width = @intCast(info.width);
+            hints.min_height = @intCast(info.height);
+            hints.max_height = @intCast(info.height);
+            XSetWMNormalHints(dpy, win, &hints);
+        }
+
+        const wm_delete = XInternAtom(dpy, "WM_DELETE_WINDOW", 0);
+        var protocols = [_]Atom{wm_delete};
+        _ = XSetWMProtocols(dpy, win, &protocols, 1);
+
+        _ = XMapWindow(dpy, win);
+        _ = XFlush(dpy);
+
+        window.* = .{
+            .display = dpy,
+            .window = win,
+            .wm_delete = wm_delete,
+            .width = info.width,
+            .height = info.height,
+        };
+
+        g_window = window;
+    }
 }
 
 pub fn vkDestroyWindow(window: *VkWindow) void {
-    _ = DestroyWindow(window.hwnd);
+    if (builtin.os.tag == .windows) {
+        _ = DestroyWindow(window.hwnd);
+    } else {
+        _ = XDestroyWindow(window.display, window.window);
+        _ = XCloseDisplay(window.display);
+    }
     g_window = null;
 }
 
@@ -21650,22 +21851,67 @@ pub fn vkWindowShouldClose(window: *const VkWindow) bool {
     return window.should_close;
 }
 
+/// Returns true if the window was resized since the flag was last cleared.
+/// The renderer polls this to trigger a swapchain rebuild, since relying solely
+/// on VK_ERROR_OUT_OF_DATE_KHR is not reliable across all WSI platforms.
+pub fn vkWindowResized(window: *const VkWindow) bool {
+    return window.resized;
+}
+
+pub fn vkResetWindowResizedFlag(window: *VkWindow) void {
+    window.resized = false;
+}
+
 pub fn vkPollEvents() void {
-    var msg: MSG = undefined;
-    while (PeekMessageW(&msg, null, 0, 0, PM_REMOVE) != win32.BOOL.FALSE) {
-        _ = TranslateMessage(&msg);
-        _ = DispatchMessageW(&msg);
+    if (builtin.os.tag == .windows) {
+        var msg: MSG = undefined;
+        while (PeekMessageW(&msg, null, 0, 0, PM_REMOVE) != win32.BOOL.FALSE) {
+            _ = TranslateMessage(&msg);
+            _ = DispatchMessageW(&msg);
+        }
+    } else {
+        const w = g_window orelse return;
+        var ev: XEvent = undefined;
+        while (XPending(w.display) > 0) {
+            _ = XNextEvent(w.display, &ev);
+            switch (ev.type) {
+                ClientMessage => {
+                    if (@as(Atom, @bitCast(ev.xclient.data.l[0])) == w.wm_delete) {
+                        w.should_close = true;
+                    }
+                },
+                ConfigureNotify => {
+                    const new_width: u32 = @intCast(ev.xconfigure.width);
+                    const new_height: u32 = @intCast(ev.xconfigure.height);
+                    if (new_width != w.width or new_height != w.height) {
+                        w.width = new_width;
+                        w.height = new_height;
+                        w.resized = true;
+                    }
+                },
+                else => {},
+            }
+        }
     }
 }
 
 pub fn vkCreateWindowSurface(window: *const VkWindow, instance: VkInstance) !VkSurfaceKHR {
-    const create_info = VkWin32SurfaceCreateInfoKHR{
-        .hinstance = window.hinstance,
-        .hwnd = window.hwnd,
-    };
     var surface: VkSurfaceKHR = null;
-    const result = vkCreateWin32SurfaceKHR(instance, &create_info, null, &surface);
-    if (result != VK_SUCCESS) return error.VkCreateSurfaceFailed;
+    if (builtin.os.tag == .windows) {
+        const create_info = VkWin32SurfaceCreateInfoKHR{
+            .hinstance = window.hinstance,
+            .hwnd = window.hwnd,
+        };
+        const result = vkCreateWin32SurfaceKHR(instance, &create_info, null, &surface);
+        if (result != VK_SUCCESS) return error.VkCreateSurfaceFailed;
+    } else {
+        const create_info = VkXlibSurfaceCreateInfoKHR{
+            .dpy = window.display,
+            .window = window.window,
+        };
+        const result = vkCreateXlibSurfaceKHR(instance, &create_info, null, &surface);
+        if (result != VK_SUCCESS) return error.VkCreateSurfaceFailed;
+    }
     return surface;
 }
 
@@ -21674,7 +21920,7 @@ pub fn vkCreateWindowSurface(window: *const VkWindow, instance: VkInstance) !VkS
 /// `buf` must have capacity of at least 3.
 pub fn vkGetRequiredInstanceExtensions(buf: [][*c]const u8) []const [*c]const u8 {
     buf[0] = "VK_KHR_surface";
-    buf[1] = "VK_KHR_win32_surface";
+    buf[1] = if (builtin.os.tag == .windows) "VK_KHR_win32_surface" else "VK_KHR_xlib_surface";
     if (builtin.mode == .Debug) {
         buf[2] = "VK_EXT_debug_utils";
         return buf[0..3];

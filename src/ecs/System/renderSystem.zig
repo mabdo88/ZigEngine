@@ -4,6 +4,11 @@ const components = @import("../Component/components.zig");
 const Registry = @import("../Storage/registry.zig").Registry;
 const cs = @import("../System/cameraSystem.zig");
 
+/// Turns a VkResult into a Zig error so failed calls surface at the source.
+fn check(result: zvkw.zvk.VkResult) !void {
+    if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
+}
+
 pub const GpuMesh = struct {
     vertexBuffer: zvkw.zvk.VkBuffer,
     vertexAllocation: zvkw.vma.VmaAllocation,
@@ -45,6 +50,7 @@ fn uploadToGpu(
         &stagingAllocation,
         &stagingInfo,
     ) != zvkw.zvk.VK_SUCCESS) return error.StagingBufferCreateFailed;
+    errdefer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, stagingBuffer, stagingAllocation);
 
     @memcpy(@as([*]u8, @ptrCast(@alignCast(stagingInfo.pMappedData)))[0..size], @as([*]const u8, @ptrCast(data))[0..size]);
 
@@ -66,6 +72,7 @@ fn uploadToGpu(
         out_allocation,
         null,
     ) != zvkw.zvk.VK_SUCCESS) return error.GpuBufferCreateFailed;
+    errdefer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(out_buffer.*), out_allocation.*);
 
     // --- One-time command buffer ---
     const cbAllocInfo = zvkw.zvk.VkCommandBufferAllocateInfo{
@@ -75,33 +82,35 @@ fn uploadToGpu(
         .commandBufferCount = 1,
     };
     var cmd: zvkw.zvk.VkCommandBuffer = null;
-    _ = zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocInfo, &cmd);
+    try check(zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocInfo, &cmd));
+    errdefer zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cmd);
 
     const beginInfo = zvkw.zvk.VkCommandBufferBeginInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    _ = zvkw.zvk.vkBeginCommandBuffer(cmd, &beginInfo);
+    try check(zvkw.zvk.vkBeginCommandBuffer(cmd, &beginInfo));
 
     const copy = zvkw.zvk.VkBufferCopy{ .size = size };
     zvkw.zvk.vkCmdCopyBuffer(cmd, @ptrCast(stagingBuffer), out_buffer.*, 1, &copy);
 
-    _ = zvkw.zvk.vkEndCommandBuffer(cmd);
+    try check(zvkw.zvk.vkEndCommandBuffer(cmd));
 
     // --- Submit and stall ---
     const fenceCI = zvkw.zvk.VkFenceCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
     };
     var fence: zvkw.zvk.VkFence = null;
-    _ = zvkw.zvk.vkCreateFence(zvkw.ctx.m_Device, &fenceCI, null, &fence);
+    try check(zvkw.zvk.vkCreateFence(zvkw.ctx.m_Device, &fenceCI, null, &fence));
+    errdefer zvkw.zvk.vkDestroyFence(zvkw.ctx.m_Device, fence, null);
 
     const submitInfo = zvkw.zvk.VkSubmitInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd,
     };
-    _ = zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, fence);
-    _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &fence, zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
+    try check(zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, fence));
+    try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &fence, zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
 
     // --- Cleanup ---
     zvkw.zvk.vkDestroyFence(zvkw.ctx.m_Device, fence, null);
