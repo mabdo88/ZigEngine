@@ -38,7 +38,7 @@ fn uploadToGpu(
     var stagingInfo: zvkw.vma.VmaAllocationInfo = undefined;
 
     if (zvkw.vma.vmaCreateBuffer(
-        zvkw.vmaAllocator,
+        zvkw.ctx.vmaAllocator,
         @ptrCast(&stagingCI),
         &stagingAllocCI,
         @ptrCast(&stagingBuffer),
@@ -59,7 +59,7 @@ fn uploadToGpu(
     };
 
     if (zvkw.vma.vmaCreateBuffer(
-        zvkw.vmaAllocator,
+        zvkw.ctx.vmaAllocator,
         @ptrCast(&bufferCI),
         &bufferAllocCI,
         @ptrCast(out_buffer),
@@ -70,12 +70,12 @@ fn uploadToGpu(
     // --- One-time command buffer ---
     const cbAllocInfo = zvkw.zvk.VkCommandBufferAllocateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = zvkw.commandPool,
+        .commandPool = zvkw.ctx.commandPool,
         .level = zvkw.zvk.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
     var cmd: zvkw.zvk.VkCommandBuffer = null;
-    _ = zvkw.zvk.vkAllocateCommandBuffers(zvkw.m_Device, &cbAllocInfo, &cmd);
+    _ = zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocInfo, &cmd);
 
     const beginInfo = zvkw.zvk.VkCommandBufferBeginInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -93,20 +93,20 @@ fn uploadToGpu(
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
     };
     var fence: zvkw.zvk.VkFence = null;
-    _ = zvkw.zvk.vkCreateFence(zvkw.m_Device, &fenceCI, null, &fence);
+    _ = zvkw.zvk.vkCreateFence(zvkw.ctx.m_Device, &fenceCI, null, &fence);
 
     const submitInfo = zvkw.zvk.VkSubmitInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd,
     };
-    _ = zvkw.zvk.vkQueueSubmit(zvkw.queue, 1, &submitInfo, fence);
-    _ = zvkw.zvk.vkWaitForFences(zvkw.m_Device, 1, &fence, zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
+    _ = zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, fence);
+    _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &fence, zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
 
     // --- Cleanup ---
-    zvkw.zvk.vkDestroyFence(zvkw.m_Device, fence, null);
-    zvkw.zvk.vkFreeCommandBuffers(zvkw.m_Device, zvkw.commandPool, 1, &cmd);
-    zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, stagingBuffer, stagingAllocation);
+    zvkw.zvk.vkDestroyFence(zvkw.ctx.m_Device, fence, null);
+    zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cmd);
+    zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, stagingBuffer, stagingAllocation);
 }
 fn uploadMesh(mesh: *const components.MeshComponent) !GpuMesh {
     var gpuMesh: GpuMesh = undefined;
@@ -132,12 +132,12 @@ pub const RenderSystem = struct {
 
     pub fn init() RenderSystem {
         return .{
-            .gpu_meshes = std.AutoHashMap(u32, GpuMesh).init(zvkw.zallocator),
+            .gpu_meshes = std.AutoHashMap(u32, GpuMesh).init(zvkw.ctx.zallocator),
         };
     }
-    pub fn update(self: *RenderSystem, registry: *Registry, cb: zvkw.zvk.VkCommandBuffer) !void {
-        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.pipelineLayout, 0, 1, &zvkw.uboDescriptorSets[zvkw.frameIndex], 0, null);
-        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.pipelineLayout, 1, 1, &zvkw.bindlessDescriptorSet, 0, null);
+    pub fn update(self: *renderSystem, registry: *Registry, cb: zvkw.zvk.VkCommandBuffer) !void {
+        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipelineLayout, 0, 1, &zvkw.ctx.uboDescriptorSets[zvkw.ctx.frameIndex], 0, null);
+        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipelineLayout, 1, 1, &zvkw.ctx.bindlessDescriptorSet, 0, null);
         var it = registry.Query(.{ components.MeshComponent, components.TransformComponent });
         while (it.next()) |entity_id| {
             const mesh = registry.get(components.MeshComponent, entity_id).?;
@@ -146,8 +146,8 @@ pub const RenderSystem = struct {
             const needs_upload = if (self.gpu_meshes.get(entity_id)) |existing| existing.source_ptr != mesh.vertices.ptr else true;
             if (needs_upload) {
                 if (self.gpu_meshes.get(entity_id)) |old| {
-                    zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(old.vertexBuffer), old.vertexAllocation);
-                    zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(old.indexBuffer), old.indexAllocation);
+                    zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(old.vertexBuffer), old.vertexAllocation);
+                    zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(old.indexBuffer), old.indexAllocation);
                 }
                 var gpu_mesh = try uploadMesh(mesh);
                 gpu_mesh.source_ptr = mesh.vertices.ptr;
@@ -164,15 +164,15 @@ pub const RenderSystem = struct {
                 .textureIndex = if (registry.get(components.TextureComponent, entity_id)) |tc| tc.textureIndex else 0,
             };
 
-            zvkw.zvk.vkCmdPushConstants(cb, zvkw.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.PushConstants), @ptrCast(&pc));
+            zvkw.zvk.vkCmdPushConstants(cb, zvkw.ctx.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.pushConstants), @ptrCast(&pc));
             zvkw.zvk.vkCmdDrawIndexed(cb, gpu_mesh.indexCount, 1, 0, 0, 0);
         }
     }
     pub fn deinit(self: *RenderSystem) void {
         var it = self.gpu_meshes.iterator();
         while (it.next()) |entry| {
-            zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(entry.value_ptr.vertexBuffer), entry.value_ptr.vertexAllocation);
-            zvkw.vma.vmaDestroyBuffer(zvkw.vmaAllocator, @ptrCast(entry.value_ptr.indexBuffer), entry.value_ptr.indexAllocation);
+            zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(entry.value_ptr.vertexBuffer), entry.value_ptr.vertexAllocation);
+            zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(entry.value_ptr.indexBuffer), entry.value_ptr.indexAllocation);
         }
         self.gpu_meshes.deinit();
     }
