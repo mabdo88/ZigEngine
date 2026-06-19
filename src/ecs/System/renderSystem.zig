@@ -50,6 +50,7 @@ fn uploadToGpu(
         &stagingAllocation,
         &stagingInfo,
     ) != zvkw.zvk.VK_SUCCESS) return error.StagingBufferCreateFailed;
+    errdefer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, stagingBuffer, stagingAllocation);
 
     @memcpy(@as([*]u8, @ptrCast(@alignCast(stagingInfo.pMappedData)))[0..size], @as([*]const u8, @ptrCast(data))[0..size]);
 
@@ -71,6 +72,7 @@ fn uploadToGpu(
         out_allocation,
         null,
     ) != zvkw.zvk.VK_SUCCESS) return error.GpuBufferCreateFailed;
+    errdefer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(out_buffer.*), out_allocation.*);
 
     // --- One-time command buffer ---
     const cbAllocInfo = zvkw.zvk.VkCommandBufferAllocateInfo{
@@ -80,7 +82,8 @@ fn uploadToGpu(
         .commandBufferCount = 1,
     };
     var cmd: zvkw.zvk.VkCommandBuffer = null;
-    _ = zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocInfo, &cmd);
+    try check(zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocInfo, &cmd));
+    errdefer zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cmd);
 
     const beginInfo = zvkw.zvk.VkCommandBufferBeginInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -98,7 +101,8 @@ fn uploadToGpu(
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
     };
     var fence: zvkw.zvk.VkFence = null;
-    _ = zvkw.zvk.vkCreateFence(zvkw.ctx.m_Device, &fenceCI, null, &fence);
+    try check(zvkw.zvk.vkCreateFence(zvkw.ctx.m_Device, &fenceCI, null, &fence));
+    errdefer zvkw.zvk.vkDestroyFence(zvkw.ctx.m_Device, fence, null);
 
     const submitInfo = zvkw.zvk.VkSubmitInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
