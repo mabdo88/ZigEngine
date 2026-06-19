@@ -127,10 +127,10 @@ fn uploadMesh(mesh: *const components.MeshComponent) !GpuMesh {
     gpuMesh.indexCount = @intCast(mesh.indices.len);
     return gpuMesh;
 }
-pub const renderSystem = struct {
+pub const RenderSystem = struct {
     gpu_meshes: std.AutoHashMap(u32, GpuMesh),
 
-    pub fn init() renderSystem {
+    pub fn init() RenderSystem {
         return .{
             .gpu_meshes = std.AutoHashMap(u32, GpuMesh).init(zvkw.ctx.zallocator),
         };
@@ -159,7 +159,7 @@ pub const renderSystem = struct {
             const offset: zvkw.zvk.VkDeviceSize = 0;
             zvkw.zvk.vkCmdBindVertexBuffers(cb, 0, 1, &gpu_mesh.vertexBuffer, &offset);
             zvkw.zvk.vkCmdBindIndexBuffer(cb, gpu_mesh.indexBuffer, 0, zvkw.zvk.VK_INDEX_TYPE_UINT32);
-            const pc = zvkw.pushConstants{
+            const pc = zvkw.PushConstants{
                 .model = transformToMatrix(transform),
                 .textureIndex = if (registry.get(components.TextureComponent, entity_id)) |tc| tc.textureIndex else 0,
             };
@@ -168,7 +168,7 @@ pub const renderSystem = struct {
             zvkw.zvk.vkCmdDrawIndexed(cb, gpu_mesh.indexCount, 1, 0, 0, 0);
         }
     }
-    pub fn deinit(self: *renderSystem) void {
+    pub fn deinit(self: *RenderSystem) void {
         var it = self.gpu_meshes.iterator();
         while (it.next()) |entry| {
             zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(entry.value_ptr.vertexBuffer), entry.value_ptr.vertexAllocation);

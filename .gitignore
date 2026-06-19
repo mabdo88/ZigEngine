@@ -1,14 +1,17 @@
+# Editor
 .vscode/
+
+# Zig build artifacts
 .zig-cache/
 zig-cache/
 zig-out/
-.vscode\
-.zig-cache\
-zig-cache\
-zig-out\bin
-.vscode
-.zig-cache
-zig-cache
-zig-out
+
+# Zig package cache (should never be committed)
+zig-pkg/
+
+# Vendored GLFW generated docs
+libs/glfw/docs/
+
+# Binaries
 *.exe
 *.pdb
