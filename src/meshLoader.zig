@@ -6,14 +6,14 @@ const stbi = @cImport({
 
 const components = @import("ecs/Component/components.zig");
 
-pub const gltfLoadResult = struct {
+pub const GltfLoadResult = struct {
     mesh: components.MeshComponent,
     pixels: []u8,
     width: u32,
     height: u32,
 };
 
-pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !gltfLoadResult {
+pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfLoadResult {
     var options = std.mem.zeroes(gltf.cgltf_options);
     var data: [*c]gltf.cgltf_data = null;
 
@@ -88,7 +88,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !gltfLoadResul
         texHeight = 1;
     }
 
-    return gltfLoadResult{
+    return GltfLoadResult{
         .mesh = components.MeshComponent{ .vertices = vertices, .indices = indices },
         .pixels = pixels,
         .width = texWidth,
