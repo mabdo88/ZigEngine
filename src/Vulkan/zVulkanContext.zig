@@ -3,53 +3,12 @@ const builtin = @import("builtin");
 pub const vma = @import("vmaimport");
 pub const zvk = @import("../glfw/zvkgl.zig");
 
-pub var frame: f32 = 0.0;
 pub const enable_validation = builtin.mode == .Debug;
 pub const max_frames_in_flight = 2;
-pub var extensions: [3][*c]const u8 = undefined;
-pub var imageIndex: u32 = 0;
-pub var frameIndex: u32 = 0;
-pub var queueFamilyIndex: u32 = 0;
 pub const validationLayers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
-pub var m_window: zvk.VkWindow = undefined;
-pub var m_instance: zvk.VkInstance = null;
-pub var m_Device: zvk.VkDevice = null;
-pub var queue: zvk.VkQueue = null;
-pub var m_physicalDevice: zvk.VkPhysicalDevice = null;
-pub var m_surface: zvk.VkSurfaceKHR = null;
-pub var m_debugMessenger: zvk.VkDebugUtilsMessengerEXT = null;
-pub var vkCreateDebugUtilsMessengerEXT: zvk.PFN_vkCreateDebugUtilsMessengerEXT = null;
-pub var vkDestroyDebugUtilsMessengerEXT: zvk.PFN_vkDestroyDebugUtilsMessengerEXT = null;
-pub var swapChain: zvk.VkSwapchainKHR = null;
-pub var swapChainExtent: zvk.VkExtent2D = undefined;
-pub var swapChainImages: []zvk.VkImage = undefined;
-pub var swapChainImageViews: []zvk.VkImageView = undefined;
-pub var commandPool: zvk.VkCommandPool = null;
-pub var pipeline: zvk.VkPipeline = null;
-pub var pipelineLayout: zvk.VkPipelineLayout = null;
-pub var colorFormat: zvk.VkFormat = zvk.VK_FORMAT_B8G8R8A8_SRGB;
-pub var colorSpace: zvk.VkColorSpaceKHR = zvk.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-pub var depthFormat: zvk.VkFormat = zvk.VK_FORMAT_UNDEFINED;
-pub var depthImage: zvk.VkImage = null;
-pub var depthImageView: zvk.VkImageView = null;
-pub var updateSwapchain: bool = false;
-pub var depthImageAllocation: vma.VmaAllocation = null;
-pub var vmaAllocator: vma.VmaAllocator = null;
-pub var zallocator: std.mem.Allocator = undefined;
-pub var commandBuffers: [max_frames_in_flight]zvk.VkCommandBuffer = undefined;
-pub var fences: [max_frames_in_flight]zvk.VkFence = undefined;
-pub var imageAcquiredSemaphores: [max_frames_in_flight]zvk.VkSemaphore = undefined;
-pub var renderCompleteSemaphores: []zvk.VkSemaphore = undefined;
-pub var vBufferAllocation: vma.VmaAllocation = null;
-pub var vBuffer: zvk.VkBuffer = null;
-pub var bindlessDescriptorSetLayout: zvk.VkDescriptorSetLayout = null;
-pub var bindlessDescriptorSet: zvk.VkDescriptorSet = null;
-pub var uboDescriptorSetLayout: zvk.VkDescriptorSetLayout = null;
-pub var uboDescriptorSets: [max_frames_in_flight]zvk.VkDescriptorSet = undefined;
-pub var bindlessSampler: zvk.VkSampler = null;
-pub var descriptorPool: zvk.VkDescriptorPool = null;
 pub const TextureHandle: type = u32;
 pub const MAX_TEXTURES: u32 = 1024;
+
 pub const shaderData = struct {
     projection: [4][4]f32,
     view: [4][4]f32,
@@ -64,7 +23,6 @@ pub const shaderDataBuffer = struct {
     deviceAddress: zvk.VkDeviceAddress = 0,
     //image: zvk.VkImage = null,
 };
-pub var shaderDataBuffers: [max_frames_in_flight]shaderDataBuffer = undefined;
 pub const Vertex = struct {
     pos: @Vector(3, f32),
     normal: @Vector(3, f32),
@@ -84,5 +42,57 @@ pub const TextureSlot = struct {
     view: zvk.VkImageView = null,
     allocation: vma.VmaAllocation = null,
 };
-pub var textureSlots: [MAX_TEXTURES]TextureSlot = undefined;
-pub var textureCount: u32 = 0;
+
+/// All mutable Vulkan state grouped into a single context object.
+/// A single instance (`ctx`) is shared today; passing `*VulkanContext` to the
+/// renderer functions later turns this into full dependency injection.
+pub const VulkanContext = struct {
+    frame: f32 = 0.0,
+    extensions: [3][*c]const u8 = undefined,
+    imageIndex: u32 = 0,
+    frameIndex: u32 = 0,
+    queueFamilyIndex: u32 = 0,
+    m_window: zvk.VkWindow = undefined,
+    m_instance: zvk.VkInstance = null,
+    m_Device: zvk.VkDevice = null,
+    queue: zvk.VkQueue = null,
+    m_physicalDevice: zvk.VkPhysicalDevice = null,
+    m_surface: zvk.VkSurfaceKHR = null,
+    m_debugMessenger: zvk.VkDebugUtilsMessengerEXT = null,
+    vkCreateDebugUtilsMessengerEXT: zvk.PFN_vkCreateDebugUtilsMessengerEXT = null,
+    vkDestroyDebugUtilsMessengerEXT: zvk.PFN_vkDestroyDebugUtilsMessengerEXT = null,
+    swapChain: zvk.VkSwapchainKHR = null,
+    swapChainExtent: zvk.VkExtent2D = undefined,
+    swapChainImages: []zvk.VkImage = undefined,
+    swapChainImageViews: []zvk.VkImageView = undefined,
+    commandPool: zvk.VkCommandPool = null,
+    pipeline: zvk.VkPipeline = null,
+    pipelineLayout: zvk.VkPipelineLayout = null,
+    colorFormat: zvk.VkFormat = zvk.VK_FORMAT_B8G8R8A8_SRGB,
+    colorSpace: zvk.VkColorSpaceKHR = zvk.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
+    depthFormat: zvk.VkFormat = zvk.VK_FORMAT_UNDEFINED,
+    depthImage: zvk.VkImage = null,
+    depthImageView: zvk.VkImageView = null,
+    updateSwapchain: bool = false,
+    depthImageAllocation: vma.VmaAllocation = null,
+    vmaAllocator: vma.VmaAllocator = null,
+    zallocator: std.mem.Allocator = undefined,
+    commandBuffers: [max_frames_in_flight]zvk.VkCommandBuffer = undefined,
+    fences: [max_frames_in_flight]zvk.VkFence = undefined,
+    imageAcquiredSemaphores: [max_frames_in_flight]zvk.VkSemaphore = undefined,
+    renderCompleteSemaphores: []zvk.VkSemaphore = undefined,
+    vBufferAllocation: vma.VmaAllocation = null,
+    vBuffer: zvk.VkBuffer = null,
+    bindlessDescriptorSetLayout: zvk.VkDescriptorSetLayout = null,
+    bindlessDescriptorSet: zvk.VkDescriptorSet = null,
+    uboDescriptorSetLayout: zvk.VkDescriptorSetLayout = null,
+    uboDescriptorSets: [max_frames_in_flight]zvk.VkDescriptorSet = undefined,
+    bindlessSampler: zvk.VkSampler = null,
+    descriptorPool: zvk.VkDescriptorPool = null,
+    shaderDataBuffers: [max_frames_in_flight]shaderDataBuffer = undefined,
+    textureSlots: [MAX_TEXTURES]TextureSlot = undefined,
+    textureCount: u32 = 0,
+};
+
+/// Shared Vulkan context instance.
+pub var ctx: VulkanContext = .{};
