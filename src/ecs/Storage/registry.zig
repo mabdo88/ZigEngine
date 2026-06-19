@@ -84,12 +84,8 @@ pub const Registry = struct {
     pub fn attach(self: *Registry, entity: Entity, component: anytype) !void {
         if (!self.isAlive(entity)) return error.EntityIsDead;
         const T = @TypeOf(component);
-        inline for (0..self.storage.len) |i| {
-            if (T == @TypeOf(self.storage[i]).ComponentType) {
-                try self.storage[i].attachComponent(self.registry_allocator, entity, component);
-                return;
-            }
-        }
+        const idx = comptime indexOfType(T);
+        try self.storage[idx].attachComponent(self.registry_allocator, entity, component);
     }
     fn indexOfType(comptime T: type) comptime_int {
         inline for (components.AllComponents, 0..) |C, i| {

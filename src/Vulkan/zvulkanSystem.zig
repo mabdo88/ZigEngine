@@ -371,6 +371,46 @@ pub fn createSwapchain() !void {
         if (result != zvkw.zvk.VK_SUCCESS) return error.CreateImageViewFailed;
     }
 }
+/// Rebuilds the swapchain and everything sized to it (image views, depth image,
+/// per-image render-complete semaphores). Called when acquire/present report the
+/// surface is out of date (resize, minimize/restore, display change).
+fn recreateSwapchain() !void {
+    // A zero-area surface (e.g. minimized window) can't have a swapchain; skip
+    // until it has a real size again.
+    var surfaceCaps: zvkw.zvk.VkSurfaceCapabilitiesKHR = undefined;
+    _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &surfaceCaps);
+    if (surfaceCaps.currentExtent.width == 0 or surfaceCaps.currentExtent.height == 0) return;
+
+    _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
+
+    // Tear down the old swapchain-dependent resources.
+    for (zvkw.ctx.swapChainImageViews) |view| {
+        zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, view, null);
+    }
+    zvkw.ctx.zallocator.free(zvkw.ctx.swapChainImageViews);
+    zvkw.ctx.zallocator.free(zvkw.ctx.swapChainImages);
+    zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.depthImageView, null);
+    zvkw.vma.vmaDestroyImage(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.depthImage), zvkw.ctx.depthImageAllocation);
+    for (zvkw.ctx.renderCompleteSemaphores) |semaphore| {
+        zvkw.zvk.vkDestroySemaphore(zvkw.ctx.m_Device, semaphore, null);
+    }
+    zvkw.ctx.zallocator.free(zvkw.ctx.renderCompleteSemaphores);
+
+    const oldSwapchain = zvkw.ctx.swapChain;
+    try createSwapchain();
+    zvkw.zvk.vkDestroySwapchainKHR(zvkw.ctx.m_Device, oldSwapchain, null);
+    try createDepthImage();
+
+    // The swapchain image count can change, so recreate the per-image semaphores.
+    const semaphoreCI = zvkw.zvk.VkSemaphoreCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+    zvkw.ctx.renderCompleteSemaphores = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkSemaphore, zvkw.ctx.swapChainImages.len);
+    for (0..zvkw.ctx.swapChainImages.len) |i| {
+        const result = zvkw.zvk.vkCreateSemaphore(zvkw.ctx.m_Device, &semaphoreCI, null, &zvkw.ctx.renderCompleteSemaphores[i]);
+        if (result != zvkw.zvk.VK_SUCCESS) return error.CreateSemaphoreFailed;
+    }
+}
 fn pickSurfaceFormat() zvkw.zvk.VkSurfaceFormatKHR {
     var formatCount: u32 = 0;
     _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceFormatsKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &formatCount, null);
@@ -479,8 +519,18 @@ fn createCommandPool() !void {
 }
 pub fn render(matrices: cs.CameraMatrices) !void {
     _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
+
+    const acquireResult = zvkw.zvk.vkAcquireNextImageKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, std.math.maxInt(u64), zvkw.ctx.imageAcquiredSemaphores[zvkw.ctx.frameIndex], null, &zvkw.ctx.imageIndex);
+    if (acquireResult == zvkw.zvk.VK_ERROR_OUT_OF_DATE_KHR) {
+        // Surface changed (resize/display change). Rebuild and skip this frame.
+        try recreateSwapchain();
+        return;
+    } else if (acquireResult != zvkw.zvk.VK_SUCCESS and acquireResult != zvkw.zvk.VK_SUBOPTIMAL_KHR) {
+        return error.AcquireImageFailed;
+    }
+    // Only reset the fence once we know we'll submit work that signals it,
+    // otherwise an early return above would leave it unsignaled and deadlock.
     _ = zvkw.zvk.vkResetFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex]);
-    _ = zvkw.zvk.vkAcquireNextImageKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, std.math.maxInt(u64), zvkw.ctx.imageAcquiredSemaphores[zvkw.ctx.frameIndex], null, &zvkw.ctx.imageIndex);
 
     const uboData = zvkw.FrameUBO{
         .projection = matrices.projection,
@@ -611,7 +661,12 @@ pub fn render(matrices: cs.CameraMatrices) !void {
         .pSwapchains = &zvkw.ctx.swapChain,
         .pImageIndices = &zvkw.ctx.imageIndex,
     };
-    _ = zvkw.zvk.vkQueuePresentKHR(zvkw.ctx.queue, &presentInfo);
+    const presentResult = zvkw.zvk.vkQueuePresentKHR(zvkw.ctx.queue, &presentInfo);
+    if (presentResult == zvkw.zvk.VK_ERROR_OUT_OF_DATE_KHR or presentResult == zvkw.zvk.VK_SUBOPTIMAL_KHR) {
+        try recreateSwapchain();
+    } else if (presentResult != zvkw.zvk.VK_SUCCESS) {
+        return error.PresentImageFailed;
+    }
     zvkw.ctx.frameIndex = (zvkw.ctx.frameIndex + 1) % zvkw.max_frames_in_flight;
 }
 
@@ -829,7 +884,7 @@ fn createSampler() !void {
 }
 pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureHandle {
     const slot = zvkw.ctx.textureCount;
-    if (slot > zvkw.MAX_TEXTURES) return error.TextureHeapFull;
+    if (slot >= zvkw.MAX_TEXTURES) return error.TextureHeapFull;
     const imageSize: zvkw.zvk.VkDeviceSize = width * height * 4;
     var stagingBuffer: zvkw.zvk.VkBuffer = null;
     var stagingAllocation: zvkw.vma.VmaAllocation = null;
