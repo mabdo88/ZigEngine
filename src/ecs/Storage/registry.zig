@@ -24,7 +24,7 @@ pub const Registry = struct {
         self.freeList = .empty;
         self.generations = .empty;
         self.registry_allocator = allocator;
-
+        self.nextEntityIndex = 0;
         self.MAX_ENTITIES = 1_000_000; // 2^24 entities
         std.log.info("Registry Online", .{});
         inline for (0..self.storage.len) |i| {

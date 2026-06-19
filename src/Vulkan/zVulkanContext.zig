@@ -89,7 +89,7 @@ pub const VulkanContext = struct {
     uboDescriptorSets: [max_frames_in_flight]zvk.VkDescriptorSet = undefined,
     bindlessSampler: zvk.VkSampler = null,
     descriptorPool: zvk.VkDescriptorPool = null,
-    shaderDataBuffers: [max_frames_in_flight]shaderDataBuffer = undefined,
+    shaderDataBuffers: [max_frames_in_flight]ShaderDataBuffer = undefined,
     textureSlots: [MAX_TEXTURES]TextureSlot = undefined,
     textureCount: u32 = 0,
 };

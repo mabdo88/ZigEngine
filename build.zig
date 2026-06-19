@@ -16,6 +16,7 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+    const os_tag = target.result.os.tag;
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -87,7 +88,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    vma_translate.addIncludePath(b.path("../../../VulkanSDK/1.4.341.1/Include/"));
+    if (os_tag == .windows) {
+        vma_translate.addIncludePath(b.path("../../../VulkanSDK/1.4.341.1/Include/"));
+    } else {
+        vma_translate.addIncludePath(.{ .cwd_relative = "/usr/include" });
+    }
     vma_translate.addIncludePath(b.path("libs/vma/"));
     //add csource files to the executable
     exe.root_module.addCSourceFile(.{
@@ -106,15 +111,23 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addCSourceFile(.{ .file = b.path("src/stb_image_impl.c") });
     exe.root_module.addIncludePath(b.path("vendor/cgltf/"));
     exe.root_module.addIncludePath(b.path("vendor/stb/"));
-    exe.root_module.addIncludePath(b.path("../../../VulkanSDK/1.4.341.1/Include/"));
     exe.root_module.addIncludePath(b.path("libs/vma/"));
-    exe.root_module.addLibraryPath(b.path("libs/glfw/lib/"));
-    exe.root_module.addLibraryPath(b.path("libs/vulkan/"));
-    exe.root_module.linkSystemLibrary("glfw3", .{});
-    exe.root_module.linkSystemLibrary("gdi32", .{});
-    exe.root_module.linkSystemLibrary("user32", .{});
-    exe.root_module.linkSystemLibrary("shell32", .{});
-    exe.root_module.linkSystemLibrary("vulkan-1", .{});
+    if (os_tag == .windows) {
+        // Windows: vendored Vulkan SDK headers + Win32 + the Windows loader (vulkan-1).
+        exe.root_module.addIncludePath(b.path("../../../VulkanSDK/1.4.341.1/Include/"));
+        exe.root_module.addLibraryPath(b.path("libs/glfw/lib/"));
+        exe.root_module.addLibraryPath(b.path("libs/vulkan/"));
+        exe.root_module.linkSystemLibrary("glfw3", .{});
+        exe.root_module.linkSystemLibrary("gdi32", .{});
+        exe.root_module.linkSystemLibrary("user32", .{});
+        exe.root_module.linkSystemLibrary("shell32", .{});
+        exe.root_module.linkSystemLibrary("vulkan-1", .{});
+    } else {
+        // Linux: system Vulkan headers/loader + native Xlib windowing.
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        exe.root_module.linkSystemLibrary("vulkan", .{});
+        exe.root_module.linkSystemLibrary("X11", .{});
+    }
 
     const vma_module = vma_translate.createModule();
     b.modules.put(b.allocator, "vmaimport", vma_module) catch unreachable; // This allows us to import the translated C header as a Zig module in our source code using `@import("vmaimport")`.

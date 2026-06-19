@@ -316,10 +316,15 @@ pub fn createSwapchain() !void {
     else
         surfaceCaps.currentExtent;
     zvkw.ctx.swapChainExtent = swapchainExtent;
+    // maxImageCount == 0 means "no upper limit", so only clamp when it is set.
+    var desiredImageCount = surfaceCaps.minImageCount + 1;
+    if (surfaceCaps.maxImageCount > 0 and desiredImageCount > surfaceCaps.maxImageCount) {
+        desiredImageCount = surfaceCaps.maxImageCount;
+    }
     const swapchainCI = zvkw.zvk.VkSwapchainCreateInfoKHR{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = zvkw.ctx.m_surface,
-        .minImageCount = @min(surfaceCaps.minImageCount + 1, surfaceCaps.maxImageCount),
+        .minImageCount = desiredImageCount,
         .imageFormat = zvkw.ctx.colorFormat,
         .imageColorSpace = zvkw.ctx.colorSpace,
         .imageExtent = swapchainExtent,

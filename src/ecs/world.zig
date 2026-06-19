@@ -21,7 +21,7 @@ pub const World = struct {
         self.entity = self.registry.createEntity();
         std.log.info("Created World Entity: {d}", .{self.entity.index});
         std.log.info("World Created ", .{});
-        try self.initVulkan(self.window.Window_title, self.window.Window_width, self.window.Window_height);
+        try self.initVulkan(self.window.title, self.window.width, self.window.height);
         self.camera = self.registry.createEntity();
         try self.registry.attach(self.camera, component.CameraComponent{});
         self.duck = self.registry.createEntity();
