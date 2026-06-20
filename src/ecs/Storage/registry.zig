@@ -9,6 +9,10 @@ fn StorageType() type {
     }
     return std.meta.Tuple(&types);
 }
+/// Called when an entity is destroyed, so external owners of per-entity
+/// resources (e.g. the renderer's GPU buffers) can release them. `ctx` is the
+/// opaque pointer registered via `setDestroyHook`.
+pub const EntityDestroyedFn = *const fn (ctx: *anyopaque, entity: Entity) void;
 pub const Registry = struct {
     freeList: std.ArrayList(u32) = .empty,
     generations: std.ArrayList(u32) = .empty,
@@ -16,6 +20,16 @@ pub const Registry = struct {
     registry_allocator: std.mem.Allocator = undefined,
     MAX_ENTITIES: u32 = 0, // 2^24 entities
     storage: StorageType() = undefined,
+    destroy_ctx: ?*anyopaque = null,
+    destroy_fn: ?EntityDestroyedFn = null,
+    pub fn setDestroyHook(self: *Registry, ctx: *anyopaque, func: EntityDestroyedFn) void {
+        self.destroy_ctx = ctx;
+        self.destroy_fn = func;
+    }
+    pub fn clearDestroyHook(self: *Registry) void {
+        self.destroy_ctx = null;
+        self.destroy_fn = null;
+    }
     pub fn aliveCount(self: *Registry) usize {
         return self.nextEntityIndex - self.freeList.items.len;
     }
@@ -60,6 +74,7 @@ pub const Registry = struct {
         if (index >= self.generations.items.len) {
             return error.InvalidEntityIndex;
         }
+        if (self.destroy_fn) |func| func(self.destroy_ctx.?, entity);
         self.generations.items[index] += 1; // Increment generation to invalidate old references
         try self.freeList.append(self.registry_allocator, index); // Add index back to free list
         inline for (0..self.storage.len) |i| {
@@ -97,7 +112,7 @@ pub const Registry = struct {
         return struct {
             registry: *Registry,
             current: usize = 0,
-            pub fn next(self: *@This()) ?u32 {
+            pub fn next(self: *@This()) ?Entity {
                 const primary = &self.registry.storage[indexOfType(Types[0])];
                 while (self.current < primary.dense.items.len) {
                     const entity_id = primary.entities.items[self.current];
@@ -108,7 +123,7 @@ pub const Registry = struct {
                             found = false;
                         }
                     }
-                    if (found) return entity_id;
+                    if (found) return Entity.make(entity_id, self.registry.generations.items[entity_id]);
                 }
                 return null;
             }
@@ -255,9 +270,9 @@ test "query entities with mesh and transform" {
 
     var it = reg.Query(.{ components.MeshComponent, components.TransformComponent });
     var count: u32 = 0;
-    while (it.next()) |entity_id| {
+    while (it.next()) |entity| {
         count += 1;
-        try std.testing.expectEqual(entity1.index, entity_id);
+        try std.testing.expectEqual(entity1.index, entity.index);
     }
     try std.testing.expectEqual(@as(u32, 1), count);
 }

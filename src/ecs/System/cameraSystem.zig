@@ -9,8 +9,8 @@ pub const CameraMatrices = struct {
 
 pub fn update(reg: *registry.Registry, aspect: f32) ?CameraMatrices {
     var it = reg.Query(.{CameraComponent});
-    while (it.next()) |entity_id| {
-        const camera = reg.get(CameraComponent, entity_id).?;
+    while (it.next()) |entity| {
+        const camera = reg.get(CameraComponent, entity.index).?;
         return CameraMatrices{
             .view = lookAt(camera.position, camera.target, camera.up),
             .projection = perspective(camera.fov, camera.near, camera.far, aspect),
