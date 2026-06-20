@@ -19,7 +19,7 @@ pub const Vertex = struct {
 };
 pub const TransformComponent = struct {
     position: @Vector(3, f32),
-    rotation: @Vector(3, f32), //Quaternion
+    rotation: @Vector(3, f32), // Euler angles (pitch, yaw, roll) in degrees
     scale: @Vector(3, f32),
 };
 pub const CameraComponent = struct {

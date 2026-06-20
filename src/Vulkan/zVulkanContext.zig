@@ -9,19 +9,22 @@ pub const validationLayers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
 pub const TextureHandle: type = u32;
 pub const MAX_TEXTURES: u32 = 1024;
 
+/// Single source of truth for the initial window size. Used as the default
+/// `WindowComponent` size and as the swapchain fallback when the surface does
+/// not dictate an extent.
+pub const default_window_width: u16 = 800;
+pub const default_window_height: u16 = 600;
+
 pub const ShaderData = struct {
     projection: [4][4]f32,
     view: [4][4]f32,
     model: [4][4]f32,
-    //lightPos: @Vector(4, f32) = @Vector(4, f32){ 0.0, -10.0, 10.0, 0.0 },
-    //selected: u32 = 1,
 };
 pub const ShaderDataBuffer = struct {
     buffer: zvk.VkBuffer = null,
     allocation: vma.VmaAllocation = null,
     allocInfo: vma.VmaAllocationInfo = undefined,
     deviceAddress: zvk.VkDeviceAddress = 0,
-    //image: zvk.VkImage = null,
 };
 pub const Vertex = struct {
     pos: @Vector(3, f32),

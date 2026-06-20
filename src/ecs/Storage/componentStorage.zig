@@ -4,54 +4,54 @@ const e = @import("../Entity/entity.zig").Entity;
 pub fn ComponentStorage(comptime T: type) type {
     return struct {
         pub const ComponentType = T;
-        wardrobe: std.ArrayList(T) = .empty,
-        slot: std.ArrayList(u32) = .empty,
-        idLabel: std.ArrayList(u32) = .empty,
+        dense: std.ArrayList(T) = .empty,
+        sparse: std.ArrayList(u32) = .empty,
+        entities: std.ArrayList(u32) = .empty,
 
         const EMPTY: u32 = std.math.maxInt(u32);
         const Self = @This();
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            self.wardrobe.deinit(allocator);
-            self.slot.deinit(allocator);
-            self.idLabel.deinit(allocator);
+            self.dense.deinit(allocator);
+            self.sparse.deinit(allocator);
+            self.entities.deinit(allocator);
         }
         pub fn attachComponent(self: *Self, allocator: std.mem.Allocator, entity: e, component: T) !void {
-            while (self.slot.items.len <= entity.index) {
-                try self.slot.append(allocator, EMPTY);
+            while (self.sparse.items.len <= entity.index) {
+                try self.sparse.append(allocator, EMPTY);
             }
-            const wardrobe_index: u32 = @intCast(self.wardrobe.items.len);
-            self.slot.items[entity.index] = wardrobe_index;
-            try self.wardrobe.append(allocator, component);
-            try self.idLabel.append(allocator, entity.index);
+            const dense_index: u32 = @intCast(self.dense.items.len);
+            self.sparse.items[entity.index] = dense_index;
+            try self.dense.append(allocator, component);
+            try self.entities.append(allocator, entity.index);
         }
         pub fn remove(self: *Self, entity: e) !void {
-            if (entity.index >= self.slot.items.len) return;
-            const wardrobe_deleted_position = self.slot.items[entity.index];
-            if (wardrobe_deleted_position == EMPTY) return;
-            if (self.wardrobe.items.len == 0) return;
-            const last_slot = self.wardrobe.items.len - 1;
-            const last_idLabel = self.idLabel.items[last_slot];
-            self.wardrobe.items[wardrobe_deleted_position] = self.wardrobe.items[last_slot];
-            self.idLabel.items[wardrobe_deleted_position] = last_idLabel;
-            self.slot.items[last_idLabel] = wardrobe_deleted_position;
-            self.slot.items[entity.index] = EMPTY;
-            _ = self.wardrobe.pop();
-            _ = self.idLabel.pop();
+            if (entity.index >= self.sparse.items.len) return;
+            const dense_deleted_position = self.sparse.items[entity.index];
+            if (dense_deleted_position == EMPTY) return;
+            if (self.dense.items.len == 0) return;
+            const last_index = self.dense.items.len - 1;
+            const last_entity = self.entities.items[last_index];
+            self.dense.items[dense_deleted_position] = self.dense.items[last_index];
+            self.entities.items[dense_deleted_position] = last_entity;
+            self.sparse.items[last_entity] = dense_deleted_position;
+            self.sparse.items[entity.index] = EMPTY;
+            _ = self.dense.pop();
+            _ = self.entities.pop();
         }
         pub fn getByIndex(self: *Self, entity_id: u32) ?*T {
-            if (entity_id >= self.slot.items.len) return null;
-            const wardrobe_position = self.slot.items[entity_id];
-            if (wardrobe_position == EMPTY) return null;
-            return &self.wardrobe.items[wardrobe_position];
+            if (entity_id >= self.sparse.items.len) return null;
+            const dense_position = self.sparse.items[entity_id];
+            if (dense_position == EMPTY) return null;
+            return &self.dense.items[dense_position];
         }
 
         pub fn get(self: *Self, entity: e) ?*T {
             return self.getByIndex(entity.index);
         }
         pub fn has(self: *Self, entity: e) bool {
-            if (entity.index >= self.slot.items.len) return false;
-            return self.slot.items[entity.index] != EMPTY;
+            if (entity.index >= self.sparse.items.len) return false;
+            return self.sparse.items[entity.index] != EMPTY;
         }
     };
 }

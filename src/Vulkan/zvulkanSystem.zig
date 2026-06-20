@@ -318,7 +318,7 @@ pub fn createSwapchain() !void {
     _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &surfaceCaps);
 
     const swapchainExtent: zvkw.zvk.VkExtent2D = if (surfaceCaps.currentExtent.width == 0xFFFFFFFF)
-        .{ .width = 800, .height = 600 }
+        .{ .width = zvkw.ctx.m_window.width, .height = zvkw.ctx.m_window.height }
     else
         surfaceCaps.currentExtent;
     zvkw.ctx.swapChainExtent = swapchainExtent;
