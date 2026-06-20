@@ -5,6 +5,10 @@ const component = @import("Component/components.zig");
 const scomponent = @import("../ecs/Component/SystemComponents.zig");
 const systems = @import("System/systems.zig");
 const mshLoader = @import("../meshLoader.zig");
+const vkctx = @import("../Vulkan/zVulkanContext.zig");
+
+/// Duck spin speed in degrees per second.
+const duck_spin_dps: f32 = 60.0;
 
 pub const World = struct {
     entity: Entity = .{},
@@ -12,7 +16,7 @@ pub const World = struct {
     duck: Entity = .{},
     registry: Registry = undefined,
     world_allocator: std.mem.Allocator = undefined,
-    window: scomponent.WindowComponent = .{ .title = "ZVulkan Window", .width = 800, .height = 600 },
+    window: scomponent.WindowComponent = .{ .title = "ZVulkan Window", .width = vkctx.default_window_width, .height = vkctx.default_window_height },
     renderer: scomponent.VulkanContextComponent = .{},
     pub fn init(self: *World, allocator: std.mem.Allocator) !void {
         std.log.info("Initializing World...", .{});
@@ -52,11 +56,20 @@ pub const World = struct {
     }
     pub fn run(self: *World) !void {
         std.log.info("World running with {d} entities", .{self.registry.aliveCount()});
+        var last_time = vkctx.zvk.vkGetTime();
         while (!systems.renderer.shouldClose()) {
             systems.renderer.pollEvents();
+            const now = vkctx.zvk.vkGetTime();
+            const dt: f32 = @floatCast(now - last_time);
+            last_time = now;
+            self.spinDuck(dt);
             const matrices = systems.camera.update(&self.registry, systems.renderer.aspectRatio());
             try systems.renderer.render(matrices.?);
         }
     }
-    //pub fn runTestCode(self: *World) void {}
+    fn spinDuck(self: *World, dt: f32) void {
+        if (self.registry.get(component.TransformComponent, self.duck.index)) |transform| {
+            transform.rotation[1] = @mod(transform.rotation[1] + duck_spin_dps * dt, 360.0);
+        }
+    }
 };

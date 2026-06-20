@@ -99,8 +99,8 @@ pub const Registry = struct {
             current: usize = 0,
             pub fn next(self: *@This()) ?u32 {
                 const primary = &self.registry.storage[indexOfType(Types[0])];
-                while (self.current < primary.wardrobe.items.len) {
-                    const entity_id = primary.idLabel.items[self.current];
+                while (self.current < primary.dense.items.len) {
+                    const entity_id = primary.entities.items[self.current];
                     self.current += 1;
                     var found = true;
                     inline for (1..Types.len) |i| {
@@ -129,16 +129,16 @@ test "attach and get component" {
 
     const entity = try reg.createEntity();
     const verts = [_]components.Vertex{
-        .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
-        .{ .pos = .{ 0.5, 0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 } },
-        .{ .pos = .{ -0.5, 0.5, 0.0 }, .color = .{ 0.0, 0.0, 1.0 } },
+        .{ .pos = .{ 0.0, -0.5, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 0.0 } },
+        .{ .pos = .{ 0.5, 0.5, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 0.0 } },
+        .{ .pos = .{ -0.5, 0.5, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
     };
     const idx = [_]u32{ 0, 1, 2 };
 
     try reg.attach(entity, components.MeshComponent{ .vertices = &verts, .indices = &idx });
-    try std.testing.expect(reg.storage[0].has(entity));
+    try std.testing.expect(reg.get(components.MeshComponent, entity.index) != null);
 
-    const mesh = reg.storage[0].get(entity).?;
+    const mesh = reg.get(components.MeshComponent, entity.index).?;
     try std.testing.expectEqual(@as(usize, 3), mesh.vertices.len);
 }
 
@@ -148,16 +148,17 @@ test "attach and destroy cleans storage" {
     defer reg.deinit();
 
     const entity = try reg.createEntity();
-    const verts = [_]components.Vertex{
-        .{ .pos = .{ 0.0, 0.0, 0.0 }, .color = .{ 1.0, 1.0, 1.0 } },
-    };
-    const idx = [_]u32{0};
+    // Heap-allocated so MeshComponent.deinit (run by destroyEntity) frees them.
+    const verts = try std.testing.allocator.alloc(components.Vertex, 1);
+    verts[0] = .{ .pos = .{ 0.0, 0.0, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 0.0 } };
+    const idx = try std.testing.allocator.alloc(u32, 1);
+    idx[0] = 0;
 
-    try reg.attach(entity, components.MeshComponent{ .vertices = &verts, .indices = &idx });
-    try std.testing.expect(reg.storage[0].has(entity));
+    try reg.attach(entity, components.MeshComponent{ .vertices = verts, .indices = idx });
+    try std.testing.expect(reg.get(components.MeshComponent, entity.index) != null);
 
     try reg.destroyEntity(entity);
-    try std.testing.expect(!reg.storage[0].has(entity));
+    try std.testing.expect(reg.get(components.MeshComponent, entity.index) == null);
     try std.testing.expect(!reg.isAlive(entity));
 }
 
@@ -169,12 +170,12 @@ test "attach transform component" {
     const entity = try reg.createEntity();
     try reg.attach(entity, components.TransformComponent{
         .position = .{ 1.0, 2.0, 3.0 },
-        .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
         .scale = .{ 1.0, 1.0, 1.0 },
     });
-    try std.testing.expect(reg.storage[1].has(entity));
+    try std.testing.expect(reg.get(components.TransformComponent, entity.index) != null);
 
-    const transform = reg.storage[1].get(entity).?;
+    const transform = reg.get(components.TransformComponent, entity.index).?;
     try std.testing.expectEqual(@as(f32, 1.0), transform.position[0]);
 }
 test "creation and destruction of entities one by one" {
@@ -237,7 +238,7 @@ test "query entities with mesh and transform" {
     const entity2 = try reg.createEntity();
 
     const verts = [_]components.Vertex{
-        .{ .pos = .{ 0.0, 0.0, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
+        .{ .pos = .{ 0.0, 0.0, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 0.0 } },
     };
     const idx = [_]u32{0};
 
@@ -245,7 +246,7 @@ test "query entities with mesh and transform" {
     try reg.attach(entity1, components.MeshComponent{ .vertices = &verts, .indices = &idx });
     try reg.attach(entity1, components.TransformComponent{
         .position = .{ 1.0, 0.0, 0.0 },
-        .rotation = .{ 0.0, 0.0, 0.0, 1.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
         .scale = .{ 1.0, 1.0, 1.0 },
     });
 
@@ -265,30 +266,33 @@ test "entity recycling produces different mesh pointers" {
     reg.init(std.testing.allocator);
     defer reg.deinit();
 
-    const vertsA = [_]components.Vertex{
-        .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 1.0, 0.0, 0.0 } },
-    };
-    const vertsB = [_]components.Vertex{
-        .{ .pos = .{ 0.0, -0.5, 0.0 }, .color = .{ 0.0, 1.0, 0.0 } },
-    };
-    const idx = [_]u32{0};
+    // Allocate both up front so the addresses are distinct even after vertsA is
+    // freed by destroyEntity; MeshComponent.deinit owns these buffers.
+    const vertsA = try std.testing.allocator.alloc(components.Vertex, 1);
+    vertsA[0] = .{ .pos = .{ 0.0, -0.5, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 0.0 } };
+    const vertsB = try std.testing.allocator.alloc(components.Vertex, 1);
+    vertsB[0] = .{ .pos = .{ 0.0, -0.5, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 1.0, 1.0 } };
+    const idxA = try std.testing.allocator.alloc(u32, 1);
+    idxA[0] = 0;
+    const idxB = try std.testing.allocator.alloc(u32, 1);
+    idxB[0] = 0;
 
     const e1 = try reg.createEntity();
-    try reg.attach(e1, components.MeshComponent{ .vertices = &vertsA, .indices = &idx });
+    try reg.attach(e1, components.MeshComponent{ .vertices = vertsA, .indices = idxA });
 
-    const mesh1 = reg.get(components.MeshComponent, e1.index).?;
-    const ptr1 = mesh1.vertices.ptr;
+    const ptr1 = reg.get(components.MeshComponent, e1.index).?.vertices.ptr;
 
-    try reg.destroyEntity(e1);
+    try reg.destroyEntity(e1); // frees vertsA / idxA
 
     const e2 = try reg.createEntity();
     try std.testing.expectEqual(e1.index, e2.index); // same index, recycled
     try std.testing.expect(e1.generation != e2.generation); // different generation
 
-    try reg.attach(e2, components.MeshComponent{ .vertices = &vertsB, .indices = &idx });
+    try reg.attach(e2, components.MeshComponent{ .vertices = vertsB, .indices = idxB });
 
-    const mesh2 = reg.get(components.MeshComponent, e2.index).?;
-    const ptr2 = mesh2.vertices.ptr;
+    const ptr2 = reg.get(components.MeshComponent, e2.index).?.vertices.ptr;
 
     try std.testing.expect(ptr1 != ptr2); // different mesh data -> different pointer
+
+    try reg.destroyEntity(e2); // frees vertsB / idxB
 }

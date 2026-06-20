@@ -57,3 +57,34 @@ fn cross(a: @Vector(3, f32), b: @Vector(3, f32)) @Vector(3, f32) {
 fn dot(a: @Vector(3, f32), b: @Vector(3, f32)) f32 {
     return @reduce(.Add, a * b);
 }
+
+test "lookAt produces identity rotation with -eye translation when looking down -Z" {
+    const m = lookAt(.{ 0.0, 0.0, 5.0 }, .{ 0.0, 0.0, 0.0 }, .{ 0.0, 1.0, 0.0 });
+    const tol = 1e-5;
+    // Basis is the identity (camera already axis-aligned).
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[0][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[1][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[2][2], tol);
+    // Translation row encodes -eye in view space: z = -5.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[3][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, -5.0), m[3][2], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[3][3], tol);
+}
+
+test "perspective matches the analytic projection terms" {
+    const fov = std.math.degreesToRadians(90.0);
+    const near: f32 = 0.5;
+    const far: f32 = 100.0;
+    const aspect: f32 = 16.0 / 9.0;
+    const m = perspective(fov, near, far, aspect);
+    const tol = 1e-5;
+    const tanHalf = std.math.tan(fov / 2.0);
+    try std.testing.expectApproxEqAbs(1.0 / (aspect * tanHalf), m[0][0], tol);
+    try std.testing.expectApproxEqAbs(-1.0 / tanHalf, m[1][1], tol);
+    try std.testing.expectApproxEqAbs(far / (near - far), m[2][2], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, -1.0), m[2][3], tol);
+    try std.testing.expectApproxEqAbs(-(far * near) / (far - near), m[3][2], tol);
+    // Aspect widens X relative to Y by exactly the aspect ratio.
+    try std.testing.expectApproxEqAbs(aspect, m[1][1] / m[0][0] * -1.0, tol);
+}

@@ -176,6 +176,9 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
     });
+    // The exe module compiles the C++ VMA implementation, so its test binary
+    // needs the C++ runtime just like the executable does.
+    exe_tests.is_linking_libcpp = true;
 
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
@@ -197,6 +200,8 @@ pub fn build(b: *std.Build) void {
     const run_ecs_tests = b.addRunArtifact(ecs_tests);
     const ecs_test_step = b.step("test-ecs", "Run ECS tests");
     ecs_test_step.dependOn(&run_ecs_tests.step);
+    // `zig build test` runs the full GPU-free suite, including the ECS tests.
+    test_step.dependOn(&run_ecs_tests.step);
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means

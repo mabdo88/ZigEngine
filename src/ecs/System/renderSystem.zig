@@ -1,4 +1,4 @@
-const std = @import("std"); // This is just an example of how to import a function from another source file in the same package. You can remove this if you don't need it.
+const std = @import("std");
 const zvkw = @import("../../Vulkan/zVulkanContext.zig");
 const components = @import("../Component/components.zig");
 const Registry = @import("../Storage/registry.zig").Registry;
@@ -209,4 +209,48 @@ fn transformToMatrix(transform: *const components.TransformComponent) [4][4]f32 
         .{ sx_s * (cx * sy * cz + sx * sz), sy_s * (cx * sy * sz - sx * cz), sz_s * (cx * cy), 0.0 },
         .{ transform.position[0], transform.position[1], transform.position[2], 1.0 },
     };
+}
+
+test "transformToMatrix: identity rotation/scale gives translation-only matrix" {
+    const t = components.TransformComponent{
+        .position = .{ 1.0, 2.0, 3.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    };
+    const m = transformToMatrix(&t);
+    const tol = 1e-5;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[0][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[1][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[2][2], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[1][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[0][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[3][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), m[3][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), m[3][2], tol);
+}
+
+test "transformToMatrix: 90-degree yaw maps +X column onto -Z" {
+    const t = components.TransformComponent{
+        .position = .{ 0.0, 0.0, 0.0 },
+        .rotation = .{ 0.0, 90.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    };
+    const m = transformToMatrix(&t);
+    const tol = 1e-5;
+    // yaw=90: first column (X axis) rotates to -Z, so m[0][0]~0 and m[0][2]~-1.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[0][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, -1.0), m[0][2], tol);
+}
+
+test "transformToMatrix: scale appears on the diagonal" {
+    const t = components.TransformComponent{
+        .position = .{ 0.0, 0.0, 0.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 2.0, 3.0, 4.0 },
+    };
+    const m = transformToMatrix(&t);
+    const tol = 1e-5;
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), m[0][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), m[1][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), m[2][2], tol);
 }
