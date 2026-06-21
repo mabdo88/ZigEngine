@@ -19,61 +19,18 @@ pub const GpuMesh = struct {
     indexCount: u32,
 };
 
-fn uploadToGpu(
-    data: *const anyopaque,
-    size: zvkw.zvk.VkDeviceSize,
-    usage: zvkw.zvk.VkBufferUsageFlags,
-    out_buffer: *zvkw.zvk.VkBuffer,
-    out_allocation: *zvkw.vma.VmaAllocation,
-) !void {
-    // --- Staging buffer (CPU writable) ---
-    const staging = try upload.createStagingBuffer(size);
-    defer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(staging.buffer), staging.allocation);
-
-    @memcpy(@as([*]u8, @ptrCast(@alignCast(staging.allocInfo.pMappedData)))[0..size], @as([*]const u8, @ptrCast(data))[0..size]);
-
-    // --- Device-local GPU buffer ---
-    const bufferCI = zvkw.zvk.VkBufferCreateInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = @as(u32, @bitCast(zvkw.zvk.VK_BUFFER_USAGE_TRANSFER_DST_BIT)) | usage,
-    };
-    const bufferAllocCI = zvkw.vma.VmaAllocationCreateInfo{
-        .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
-    };
-
-    if (zvkw.vma.vmaCreateBuffer(
-        zvkw.ctx.vmaAllocator,
-        @ptrCast(&bufferCI),
-        &bufferAllocCI,
-        @ptrCast(out_buffer),
-        out_allocation,
-        null,
-    ) != zvkw.zvk.VK_SUCCESS) return error.GpuBufferCreateFailed;
-    errdefer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(out_buffer.*), out_allocation.*);
-
-    // --- One-time command buffer ---
-    const cmd = try upload.beginOneTimeCommandBuffer();
-    defer zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cmd);
-
-    const copy = zvkw.zvk.VkBufferCopy{ .size = size };
-    zvkw.zvk.vkCmdCopyBuffer(cmd, @ptrCast(staging.buffer), out_buffer.*, 1, &copy);
-
-    try check(zvkw.zvk.vkEndCommandBuffer(cmd));
-
-    // --- Submit and stall ---
-    try upload.submitAndWait(cmd);
-}
+/// Upload a single mesh immediately (one submit). Used for late/lazy uploads during render.
 fn uploadMesh(mesh: *const components.MeshComponent) !GpuMesh {
+    var batch = try upload.UploadBatch.begin(zvkw.ctx.zallocator);
     var gpuMesh: GpuMesh = undefined;
-    try uploadToGpu(
+    try batch.uploadBuffer(
         mesh.vertices.ptr,
         @sizeOf(components.Vertex) * mesh.vertices.len,
         zvkw.zvk.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
         &gpuMesh.vertexBuffer,
         &gpuMesh.vertexAllocation,
     );
-    try uploadToGpu(
+    try batch.uploadBuffer(
         mesh.indices.ptr,
         @sizeOf(u32) * mesh.indices.len,
         zvkw.zvk.VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
@@ -81,7 +38,27 @@ fn uploadMesh(mesh: *const components.MeshComponent) !GpuMesh {
         &gpuMesh.indexAllocation,
     );
     gpuMesh.indexCount = @intCast(mesh.indices.len);
+    try batch.submit();
     return gpuMesh;
+}
+
+/// Record a mesh upload into an existing UploadBatch (no submit — caller submits).
+pub fn recordMeshUpload(batch: *upload.UploadBatch, mesh: *const components.MeshComponent, out: *GpuMesh) !void {
+    try batch.uploadBuffer(
+        mesh.vertices.ptr,
+        @sizeOf(components.Vertex) * mesh.vertices.len,
+        zvkw.zvk.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        &out.vertexBuffer,
+        &out.vertexAllocation,
+    );
+    try batch.uploadBuffer(
+        mesh.indices.ptr,
+        @sizeOf(u32) * mesh.indices.len,
+        zvkw.zvk.VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        &out.indexBuffer,
+        &out.indexAllocation,
+    );
+    out.indexCount = @intCast(mesh.indices.len);
 }
 pub const RenderSystem = struct {
     gpu_meshes: std.AutoHashMap(Entity, GpuMesh),
@@ -137,6 +114,14 @@ pub const RenderSystem = struct {
         self.gpu_meshes.deinit();
     }
 };
+/// Converts a TransformComponent to a 4x4 column-major model matrix.
+/// Rotation order is YXZ (yaw-pitch-roll intrinsic), which is:
+///   - yaw (Y-axis) first
+///   - pitch (X-axis) second
+///   - roll (Z-axis) third
+/// This order avoids gimbal lock for typical camera/object rotations where
+/// yaw is the primary horizontal rotation. For full 3D rotations with all
+/// three axes active, consider using quaternions instead.
 fn transformToMatrix(transform: *const components.TransformComponent) [4][4]f32 {
     const toRad = std.math.pi / 180.0;
     const pitch = transform.rotation[0] * toRad;
