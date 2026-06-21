@@ -93,6 +93,10 @@ pub fn deinit() void {
     // Drop the destroy hook before tearing down the GPU mesh map and allocator,
     // so any later destroyEntity (e.g. in World.deinit) can't touch freed state.
     registry.clearDestroyHook();
+    // Wait for all in-flight frames to complete before destroying mesh buffers
+    for (0..zvkw.max_frames_in_flight) |i| {
+        _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[i], zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
+    }
     renderSystem.deinit();
     zvkw.vma.vmaDestroyAllocator(zvkw.ctx.vmaAllocator);
     zvkw.zvk.vkDestroyCommandPool(zvkw.ctx.m_Device, zvkw.ctx.commandPool, null);
