@@ -15,3 +15,6 @@ libs/glfw/docs/
 # Binaries
 *.exe
 *.pdb
+
+# Documentation
+docs/

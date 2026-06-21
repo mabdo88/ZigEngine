@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const vma_translate = b.addTranslateC(.{
-        .root_source_file = b.path("libs/vma/vk_mem_alloc.h"),
+        .root_source_file = b.path("deps/vma/vk_mem_alloc.h"),
         .target = target,
         .optimize = optimize,
     });
@@ -41,27 +41,27 @@ pub fn build(b: *std.Build) void {
     } else {
         vma_translate.addIncludePath(.{ .cwd_relative = "/usr/include" });
     }
-    vma_translate.addIncludePath(b.path("libs/vma/"));
+    vma_translate.addIncludePath(b.path("deps/vma/"));
     // Add C++ VMA implementation
     exe.root_module.addCSourceFile(.{
-        .file = b.path("src/Vulkan/vma_impl.cpp"),
+        .file = b.path("src/renderer/vma_impl.cpp"),
         .flags = &[_][]const u8{"-std=c++17"},
         .language = .cpp,
     });
 
     exe.is_linking_libcpp = true;
     b.installArtifact(exe);
-    exe.root_module.addCSourceFile(.{ .file = b.path("src/cgltf_impl.c") });
-    exe.root_module.addCSourceFile(.{ .file = b.path("src/stb_image_impl.c") });
-    exe.root_module.addIncludePath(b.path("vendor/cgltf/"));
-    exe.root_module.addIncludePath(b.path("vendor/stb/"));
-    exe.root_module.addIncludePath(b.path("libs/vma/"));
+    exe.root_module.addCSourceFile(.{ .file = b.path("src/native/cgltf_impl.c") });
+    exe.root_module.addCSourceFile(.{ .file = b.path("src/native/stb_image_impl.c") });
+    exe.root_module.addIncludePath(b.path("deps/cgltf/"));
+    exe.root_module.addIncludePath(b.path("deps/stb/"));
+    exe.root_module.addIncludePath(b.path("deps/vma/"));
     if (os_tag == .windows) {
         // Windows: vendored Vulkan SDK headers + Win32 + the Windows loader (vulkan-1).
         const vulkan_include = b.fmt("{s}/Include/", .{vulkan_sdk_path});
         exe.root_module.addIncludePath(.{ .cwd_relative = vulkan_include });
-        exe.root_module.addLibraryPath(b.path("libs/glfw/lib/"));
-        exe.root_module.addLibraryPath(b.path("libs/vulkan/"));
+        exe.root_module.addLibraryPath(b.path("deps/glfw/lib/"));
+        exe.root_module.addLibraryPath(b.path("deps/vulkan/"));
         exe.root_module.linkSystemLibrary("glfw3", .{});
         exe.root_module.linkSystemLibrary("gdi32", .{});
         exe.root_module.linkSystemLibrary("user32", .{});
@@ -102,7 +102,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     const ecs_module = b.createModule(.{
-        .root_source_file = b.path("src/ecs/ecs_test.zig"),
+        .root_source_file = b.path("src/engine/ecs_test.zig"),
         .target = target,
         .optimize = optimize,
     });

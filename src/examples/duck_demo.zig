@@ -1,11 +1,11 @@
 //! Duck demo: loads and animates a glTF duck model
 const std = @import("std");
-const Registry = @import("../ecs/Storage/registry.zig").Registry;
-const Entity = @import("../ecs/Entity/entity.zig").Entity;
-const component = @import("../ecs/Component/components.zig");
-const systems = @import("../ecs/System/systems.zig");
-const mshLoader = @import("../meshLoader.zig");
-const vkctx = @import("../Vulkan/zVulkanContext.zig");
+const Registry = @import("../engine/registry.zig").Registry;
+const Entity = @import("../engine/entity.zig").Entity;
+const component = @import("../components/components.zig");
+const systems = @import("../renderer/systems.zig");
+const mshLoader = @import("../resources/meshLoader.zig");
+const vkctx = @import("../renderer/zVulkanContext.zig");
 
 const duck_spin_dps: f32 = 60.0;
 

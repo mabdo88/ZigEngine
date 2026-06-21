@@ -1,7 +1,7 @@
 const std = @import("std");
-const Engine = @import("ecs/engine.zig").Engine;
+const Engine = @import("engine/engine.zig").Engine;
 const DuckDemo = @import("examples/duck_demo.zig").DuckDemo;
-const vkctx = @import("Vulkan/zVulkanContext.zig");
+const vkctx = @import("renderer/zVulkanContext.zig");
 
 pub fn main() !void {
     var engine: Engine = .{};

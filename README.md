@@ -34,7 +34,7 @@ Engine                      owns the allocator + World, runs the main loop
         └── RenderSystem    uploads meshes to the GPU and records draw calls
 ```
 
-Components (`src/ecs/Component/components.zig`):
+Components (`src/components/components.zig`):
 
 | Component            | Purpose                                  |
 | -------------------- | ---------------------------------------- |
@@ -43,26 +43,46 @@ Components (`src/ecs/Component/components.zig`):
 | `CameraComponent`    | eye, target, up, fov, near/far planes    |
 | `TextureComponent`   | index into the bindless texture heap     |
 
-The Vulkan backend lives under `src/Vulkan/`: `zVulkanContext.zig` holds device/swapchain/pipeline state and `zvulkanSystem.zig` drives initialization, the per-frame render loop, and texture/buffer uploads.
+The Vulkan backend lives under `src/renderer/`: `zVulkanContext.zig` holds device/swapchain/pipeline state and `zvulkanSystem.zig` drives initialization, the per-frame render loop, and texture/buffer uploads.
 
 ## Project layout
 
 ```
 src/
 ├── main.zig                 entry point
-├── ecs/                     entity-component-system core
-│   ├── Entity/              generational entity handles
-│   ├── Component/           component & system-component definitions
+├── engine/                  core engine (ECS + World)
+│   ├── engine.zig           main Engine struct
+│   ├── world.zig            World/Registry
 │   ├── Storage/             registry + sparse-set component storage
-│   └── System/              camera & render systems
-├── Vulkan/                  Vulkan context + renderer (VMA integration)
-├── glfw/                    windowing / Vulkan bindings
-├── shaders/                 Slang shaders + compiled SPIR-V
-├── meshLoader.zig           glTF + texture loading
-└── cgltf.zig                generated cgltf bindings
-vendor/                      vendored C single-header libs (cgltf, stb)
-libs/                        GLFW, VMA, Vulkan link libraries
-assets/                      sample models (e.g. the duck)
+│   └── Entity/              generational entity handles
+├── renderer/                Vulkan renderer
+│   ├── context.zig          Vulkan context
+│   ├── system.zig           render system
+│   └── vma_impl.cpp         VMA C++ implementation
+├── platform/                platform abstraction layer
+│   ├── window.zig           window management
+│   └── vulkan.zig           Vulkan+GLFW bindings
+├── resources/               resource loading
+│   ├── mesh.zig             glTF mesh loader
+│   ├── texture.zig          texture loading utilities
+│   └── cgltf.zig            generated cgltf bindings
+├── native/                  C implementation files
+│   ├── cgltf_impl.c
+│   └── stb_image_impl.c
+└── components/               ECS components
+    ├── components.zig       core component definitions
+    └── system_components.zig system-specific components
+deps/                        all third-party dependencies (consolidated)
+│   ├── glfw/                GLFW library
+│   ├── vma/                 Vulkan Memory Allocator
+│   ├── vulkan/              Vulkan SDK libraries
+│   ├── cgltf/               glTF loader
+│   └── stb/                 stb_image
+examples/                   demo applications
+assets/                      game assets
+    ├── duck/                duck model assets
+    └── shaders/             shader source and compiled SPIR-V
+docs/                        documentation
 ```
 
 ## Requirements
