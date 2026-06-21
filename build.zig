@@ -17,6 +17,13 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
     const os_tag = target.result.os.tag;
+
+    // Vulkan SDK path configuration
+    const vulkan_sdk_path = b.option(
+        []const u8,
+        "vulkan-sdk",
+        "Path to Vulkan SDK (defaults to VULKAN_SDK env var or ../../../VulkanSDK/1.4.341.1)",
+    ) orelse b.graph.environ_map.get("VULKAN_SDK") orelse "../../../VulkanSDK/1.4.341.1";
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -89,7 +96,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     if (os_tag == .windows) {
-        vma_translate.addIncludePath(b.path("../../../VulkanSDK/1.4.341.1/Include/"));
+        const vulkan_include = b.fmt("{s}/Include/", .{vulkan_sdk_path});
+        vma_translate.addIncludePath(b.path(vulkan_include));
     } else {
         vma_translate.addIncludePath(.{ .cwd_relative = "/usr/include" });
     }
@@ -114,7 +122,8 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addIncludePath(b.path("libs/vma/"));
     if (os_tag == .windows) {
         // Windows: vendored Vulkan SDK headers + Win32 + the Windows loader (vulkan-1).
-        exe.root_module.addIncludePath(b.path("../../../VulkanSDK/1.4.341.1/Include/"));
+        const vulkan_include = b.fmt("{s}/Include/", .{vulkan_sdk_path});
+        exe.root_module.addIncludePath(b.path(vulkan_include));
         exe.root_module.addLibraryPath(b.path("libs/glfw/lib/"));
         exe.root_module.addLibraryPath(b.path("libs/vulkan/"));
         exe.root_module.linkSystemLibrary("glfw3", .{});
