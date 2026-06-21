@@ -1,8 +1,9 @@
-const std = @import("std"); // This is just an example of how to import a function from another source file in the same package. You can remove this if you don't need it.
-const zvkw = @import("../../Vulkan/zVulkanContext.zig");
-const components = @import("../Component/components.zig");
-const Registry = @import("../Storage/registry.zig").Registry;
-const cs = @import("../System/cameraSystem.zig");
+const std = @import("std");
+const zvkw = @import("zVulkanContext.zig");
+const components = @import("../components/components.zig");
+const Registry = @import("../engine/registry.zig").Registry;
+const Entity = @import("../engine/entity.zig").Entity;
+const cs = @import("cameraSystem.zig");
 
 /// Turns a VkResult into a Zig error so failed calls surface at the source.
 fn check(result: zvkw.zvk.VkResult) !void {
@@ -15,7 +16,6 @@ pub const GpuMesh = struct {
     indexBuffer: zvkw.zvk.VkBuffer,
     indexAllocation: zvkw.vma.VmaAllocation,
     indexCount: u32,
-    source_ptr: [*]const components.Vertex,
 };
 
 fn uploadToGpu(
@@ -137,40 +137,44 @@ fn uploadMesh(mesh: *const components.MeshComponent) !GpuMesh {
     return gpuMesh;
 }
 pub const RenderSystem = struct {
-    gpu_meshes: std.AutoHashMap(u32, GpuMesh),
+    gpu_meshes: std.AutoHashMap(Entity, GpuMesh),
 
     pub fn init() RenderSystem {
         return .{
-            .gpu_meshes = std.AutoHashMap(u32, GpuMesh).init(zvkw.ctx.zallocator),
+            .gpu_meshes = std.AutoHashMap(Entity, GpuMesh).init(zvkw.ctx.zallocator),
         };
+    }
+    /// Registry destroy hook: frees the GPU buffers for an entity the moment it
+    /// is destroyed, keyed by (index, generation) so a recycled index can't
+    /// collide with the previous owner's mesh.
+    pub fn onEntityDestroyed(ctx: *anyopaque, entity: Entity) void {
+        const self: *RenderSystem = @ptrCast(@alignCast(ctx));
+        if (self.gpu_meshes.fetchRemove(entity)) |kv| {
+            zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(kv.value.vertexBuffer), kv.value.vertexAllocation);
+            zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(kv.value.indexBuffer), kv.value.indexAllocation);
+        }
     }
     pub fn update(self: *RenderSystem, registry: *Registry, cb: zvkw.zvk.VkCommandBuffer) !void {
         zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipelineLayout, 0, 1, &zvkw.ctx.uboDescriptorSets[zvkw.ctx.frameIndex], 0, null);
         zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipelineLayout, 1, 1, &zvkw.ctx.bindlessDescriptorSet, 0, null);
         var it = registry.Query(.{ components.MeshComponent, components.TransformComponent });
-        while (it.next()) |entity_id| {
-            const mesh = registry.get(components.MeshComponent, entity_id).?;
-            const transform = registry.get(components.TransformComponent, entity_id).?;
+        while (it.next()) |entity| {
+            const mesh = registry.get(components.MeshComponent, entity.index).?;
+            const transform = registry.get(components.TransformComponent, entity.index).?;
             if (!mesh.isValid()) continue;
-            const needs_upload = if (self.gpu_meshes.get(entity_id)) |existing| existing.source_ptr != mesh.vertices.ptr else true;
-            if (needs_upload) {
-                if (self.gpu_meshes.get(entity_id)) |old| {
-                    zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(old.vertexBuffer), old.vertexAllocation);
-                    zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(old.indexBuffer), old.indexAllocation);
-                }
-                var gpu_mesh = try uploadMesh(mesh);
-                gpu_mesh.source_ptr = mesh.vertices.ptr;
-                try self.gpu_meshes.put(entity_id, gpu_mesh);
-                std.log.info("RenderSystem: uploaded mesh for entity {}", .{entity_id});
+            if (!self.gpu_meshes.contains(entity)) {
+                const gpu_mesh = try uploadMesh(mesh);
+                try self.gpu_meshes.put(entity, gpu_mesh);
+                std.log.info("RenderSystem: uploaded mesh for entity {}", .{entity.index});
             }
 
-            const gpu_mesh = self.gpu_meshes.get(entity_id).?;
+            const gpu_mesh = self.gpu_meshes.get(entity).?;
             const offset: zvkw.zvk.VkDeviceSize = 0;
             zvkw.zvk.vkCmdBindVertexBuffers(cb, 0, 1, &gpu_mesh.vertexBuffer, &offset);
             zvkw.zvk.vkCmdBindIndexBuffer(cb, gpu_mesh.indexBuffer, 0, zvkw.zvk.VK_INDEX_TYPE_UINT32);
             const pc = zvkw.PushConstants{
                 .model = transformToMatrix(transform),
-                .textureIndex = if (registry.get(components.TextureComponent, entity_id)) |tc| tc.textureIndex else 0,
+                .textureIndex = if (registry.get(components.TextureComponent, entity.index)) |tc| tc.textureIndex else 0,
             };
 
             zvkw.zvk.vkCmdPushConstants(cb, zvkw.ctx.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.PushConstants), @ptrCast(&pc));
@@ -209,4 +213,48 @@ fn transformToMatrix(transform: *const components.TransformComponent) [4][4]f32 
         .{ sx_s * (cx * sy * cz + sx * sz), sy_s * (cx * sy * sz - sx * cz), sz_s * (cx * cy), 0.0 },
         .{ transform.position[0], transform.position[1], transform.position[2], 1.0 },
     };
+}
+
+test "transformToMatrix: identity rotation/scale gives translation-only matrix" {
+    const t = components.TransformComponent{
+        .position = .{ 1.0, 2.0, 3.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    };
+    const m = transformToMatrix(&t);
+    const tol = 1e-5;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[0][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[1][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[2][2], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[1][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[0][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), m[3][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), m[3][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), m[3][2], tol);
+}
+
+test "transformToMatrix: 90-degree yaw maps +X column onto -Z" {
+    const t = components.TransformComponent{
+        .position = .{ 0.0, 0.0, 0.0 },
+        .rotation = .{ 0.0, 90.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    };
+    const m = transformToMatrix(&t);
+    const tol = 1e-5;
+    // yaw=90: first column (X axis) rotates to -Z, so m[0][0]~0 and m[0][2]~-1.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), m[0][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, -1.0), m[0][2], tol);
+}
+
+test "transformToMatrix: scale appears on the diagonal" {
+    const t = components.TransformComponent{
+        .position = .{ 0.0, 0.0, 0.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 2.0, 3.0, 4.0 },
+    };
+    const m = transformToMatrix(&t);
+    const tol = 1e-5;
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), m[0][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.0), m[1][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), m[2][2], tol);
 }

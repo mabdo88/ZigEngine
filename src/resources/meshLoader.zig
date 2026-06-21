@@ -1,10 +1,10 @@
 const std = @import("std");
 const gltf = @import("cgltf.zig");
 const stbi = @cImport({
-    @cInclude("../stb/stb_image.h");
+    @cInclude("../../deps/stb/stb_image.h");
 });
 
-const components = @import("ecs/Component/components.zig");
+const components = @import("../components/components.zig");
 
 pub const GltfLoadResult = struct {
     mesh: components.MeshComponent,
@@ -46,8 +46,8 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfLoadResul
         var normal: [3]f32 = .{ 0, 0, 0 };
         var uv: [2]f32 = .{ 0, 0 };
         _ = gltf.cgltf_accessor_read_float(pos_accessor.?, i, &pos, 3);
-        _ = gltf.cgltf_accessor_read_float(normal_accessor, i, &normal, 3);
-        _ = gltf.cgltf_accessor_read_float(uv_accessor, i, &uv, 2);
+        _ = gltf.cgltf_accessor_read_float(normal_accessor.?, i, &normal, 3);
+        _ = gltf.cgltf_accessor_read_float(uv_accessor.?, i, &uv, 2);
         vertices[i] = .{ .pos = .{ pos[0], pos[1], pos[2] }, .normal = .{ normal[0], normal[1], normal[2] }, .uv = .{ uv[0], uv[1] } };
     }
     if (prim.indices == null) return error.gltfNoIndices;

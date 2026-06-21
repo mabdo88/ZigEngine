@@ -9,11 +9,16 @@ const Error = error{
 pub const Engine = struct {
     gpa: std.heap.DebugAllocator(.{}) = .{},
     world: World = .{},
-    //Initialize the ECS engine with error return when fails
+
     pub fn init(self: *Engine) !void {
         LOG.info("Initializing ECS Engine...", .{});
         try self.world.init(self.gpa.allocator());
     }
+
+    pub fn initVulkan(self: *Engine, title: ?[:0]const u8, width: u16, height: u16) !void {
+        try self.world.initVulkan(title, width, height);
+    }
+
     pub fn deinit(self: *Engine) void {
         self.world.deinit();
         const check = self.gpa.deinit();
@@ -23,7 +28,12 @@ pub const Engine = struct {
             LOG.info("No memory leaks detected during engine deinitialization...Shutdown complete.", .{});
         }
     }
-    pub fn run(self: *Engine) !void {
-        try self.world.run();
+
+    pub fn run(self: *Engine, context: anytype, updateFn: anytype) !void {
+        try self.world.run(context, updateFn);
+    }
+
+    pub fn registry(self: *Engine) *World {
+        return &self.world;
     }
 };

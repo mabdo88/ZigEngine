@@ -1,4 +1,4 @@
-const zvk = @import("../../glfw/zvkgl.zig");
+const zvk = @import("../platform/zvkgl.zig");
 
 pub const SystemComponent = union(enum) {
     window: WindowComponent,

@@ -21603,6 +21603,8 @@ extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(.c) isize;
 extern "user32" fn PostQuitMessage(nExitCode: i32) callconv(.c) void;
 extern "user32" fn LoadCursorW(hInstance: ?win32.HINSTANCE, lpCursorName: u32) callconv(.c) ?win32.HANDLE;
 extern "kernel32" fn GetModuleHandleW(lpModuleName: ?[*:0]const u16) callconv(.c) win32.HINSTANCE;
+extern "kernel32" fn QueryPerformanceCounter(lpPerformanceCount: *i64) callconv(.c) win32.BOOL;
+extern "kernel32" fn QueryPerformanceFrequency(lpFrequency: *i64) callconv(.c) win32.BOOL;
 
 fn wndProc(hwnd: win32.HWND, msg: u32, wParam: usize, lParam: isize) callconv(.c) isize {
     switch (msg) {
@@ -21892,6 +21894,22 @@ pub fn vkPollEvents() void {
                 else => {},
             }
         }
+    }
+}
+
+/// Monotonic time in seconds since an arbitrary epoch, used for frame timing.
+/// Backed by QueryPerformanceCounter on Windows and CLOCK_MONOTONIC elsewhere.
+pub fn vkGetTime() f64 {
+    if (builtin.os.tag == .windows) {
+        var freq: i64 = 0;
+        var counter: i64 = 0;
+        _ = QueryPerformanceFrequency(&freq);
+        _ = QueryPerformanceCounter(&counter);
+        return @as(f64, @floatFromInt(counter)) / @as(f64, @floatFromInt(freq));
+    } else {
+        var ts: std.os.linux.timespec = undefined;
+        _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts);
+        return @as(f64, @floatFromInt(ts.sec)) + @as(f64, @floatFromInt(ts.nsec)) / 1_000_000_000.0;
     }
 }
 
