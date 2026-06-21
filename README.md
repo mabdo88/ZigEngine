@@ -82,9 +82,17 @@ zig build run
 
 # Run the GPU-free ECS unit tests
 zig build test-ecs
+
+# Build with custom Vulkan SDK path
+zig build -Dvulkan-sdk=/path/to/VulkanSDK/1.4.341.1
 ```
 
-> **Heads up:** `build.zig` currently expects the Vulkan SDK at a hardcoded relative path (`../../../VulkanSDK/1.4.341.1/Include/`) and links the Windows system libraries (`gdi32`, `user32`, `shell32`, `vulkan-1`). You'll likely need to adjust those paths for your machine. Making the SDK path configurable and the link step OS-aware is on the roadmap.
+> **Heads up:** The Vulkan SDK path can be configured via:
+> - The `--vulkan-sdk` build option: `zig build -Dvulkan-sdk=/path/to/VulkanSDK/1.4.341.1`
+> - The `VULKAN_SDK` environment variable
+> - Defaults to `../../../VulkanSDK/1.4.341.1/` if neither is set
+>
+> The build currently links Windows system libraries (`gdi32`, `user32`, `shell32`, `vulkan-1`). Making the link step fully OS-aware is on the roadmap.
 
 ## Platform support
 
