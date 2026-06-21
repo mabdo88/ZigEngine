@@ -6,6 +6,15 @@ const stbi = @cImport({
 
 const components = @import("../components/components.zig");
 
+/// Result of loading a glTF file.
+/// The caller owns all memory in this struct and must free it:
+/// - mesh.vertices: must be freed with the allocator passed to loadgltf
+/// - mesh.indices: must be freed with the allocator passed to loadgltf
+/// - pixels: must be freed with the allocator passed to loadgltf
+/// 
+/// If the mesh is attached to an entity and the entity is destroyed via
+/// Registry.destroyEntity, the mesh.deinit will be called automatically,
+/// but pixels must still be freed manually by the caller after texture upload.
 pub const GltfLoadResult = struct {
     mesh: components.MeshComponent,
     pixels: []u8,
@@ -92,7 +101,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfLoadResul
     }
 
     return GltfLoadResult{
-        .mesh = components.MeshComponent{ .vertices = vertices, .indices = indices },
+        .mesh = components.MeshComponent{ .vertices = vertices, .indices = indices, .owns_memory = true },
         .pixels = pixels,
         .width = texWidth,
         .height = texHeight,

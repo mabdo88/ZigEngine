@@ -13,7 +13,7 @@ pub fn main() !void {
 
     // Initialize duck demo
     var demo = DuckDemo{};
-    try demo.init(engine.registry().registryPtr(), engine.gpa.allocator());
+    try demo.init(engine.registry(), engine.gpa.allocator());
     defer demo.deinit();
 
     // Run engine with demo update function

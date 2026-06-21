@@ -9,3 +9,11 @@ pub const Entity = struct {
         return .{ .index = index, .generation = generation };
     }
 };
+
+// Component bit indices for bitset optimization
+pub const ComponentBits = enum(u64) {
+    Mesh = 0,
+    Transform = 1,
+    Camera = 2,
+    Texture = 3,
+};

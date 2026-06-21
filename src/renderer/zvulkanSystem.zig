@@ -4,9 +4,7 @@ const rgstry = @import("../engine/registry.zig");
 const rs = @import("renderSystem.zig").RenderSystem;
 const cs = @import("cameraSystem.zig");
 const zvkw = @import("zVulkanContext.zig");
-
-pub var renderSystem: rs = undefined;
-pub var registry: *rgstry.Registry = undefined;
+const upload = @import("upload.zig");
 
 /// Turns a VkResult into a Zig error so failed calls surface immediately at the
 /// source instead of causing undefined behavior later.
@@ -14,9 +12,9 @@ fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
 }
 
-pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry) !void {
+pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry, render_system: *rs) !void {
     zvkw.ctx.zallocator = zig_allocator;
-    registry = reg;
+    render_system.* = rs.init();
     const windowCI = zvkw.zvk.VkWindowCreateInfo{
         .title = title.?,
         .width = WWidth,
@@ -24,7 +22,7 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
         .resizable = true,
     };
     try zvkw.zvk.vkCreateWindow(windowCI, &zvkw.ctx.m_window);
-    _ = zvkw.zvk.vkGetRequiredInstanceExtensions(&zvkw.ctx.extensions);
+    zvkw.ctx.extensions = try zvkw.zvk.vkGetRequiredInstanceExtensions(zig_allocator);
 
     const appCI = zvkw.zvk.VkApplicationInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -40,7 +38,7 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
         .enabledLayerCount = if (zvkw.enable_validation) 1 else 0,
         .ppEnabledLayerNames = if (zvkw.enable_validation) &zvkw.validationLayers else null,
         .enabledExtensionCount = @intCast(zvkw.ctx.extensions.len),
-        .ppEnabledExtensionNames = &zvkw.ctx.extensions,
+        .ppEnabledExtensionNames = zvkw.ctx.extensions.ptr,
     };
 
     const result = zvkw.zvk.vkCreateInstance(&instanceCI, null, &zvkw.ctx.m_instance);
@@ -61,12 +59,13 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
     try createShaderDataBuffers();
     try createSampler();
     try createDefaultTexture();
-    renderSystem = rs.init();
-    registry.setDestroyHook(@ptrCast(&renderSystem), rs.onEntityDestroyed);
+    reg.setDestroyHook(@ptrCast(render_system), rs.onEntityDestroyed);
 }
 
-pub fn deinit() void {
+pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
     _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
+    // Free extensions array
+    zvkw.ctx.zallocator.free(zvkw.ctx.extensions);
     // destroy textures
     for (0..zvkw.ctx.textureCount) |i| {
         zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.textureSlots[i].view, null);
@@ -92,12 +91,12 @@ pub fn deinit() void {
     }
     // Drop the destroy hook before tearing down the GPU mesh map and allocator,
     // so any later destroyEntity (e.g. in World.deinit) can't touch freed state.
-    registry.clearDestroyHook();
+    reg.clearDestroyHook();
     // Wait for all in-flight frames to complete before destroying mesh buffers
     for (0..zvkw.max_frames_in_flight) |i| {
         _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[i], zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
     }
-    renderSystem.deinit();
+    render_system.deinit();
     zvkw.vma.vmaDestroyAllocator(zvkw.ctx.vmaAllocator);
     zvkw.zvk.vkDestroyCommandPool(zvkw.ctx.m_Device, zvkw.ctx.commandPool, null);
     for (0..zvkw.max_frames_in_flight) |i| {
@@ -145,12 +144,12 @@ fn setupDebugMessenger() void {
 }
 fn pickPhysicalDevice() !void {
     var deviceCount: u32 = 0;
-    _ = zvkw.zvk.vkEnumeratePhysicalDevices(zvkw.ctx.m_instance, &deviceCount, null);
+    try check(zvkw.zvk.vkEnumeratePhysicalDevices(zvkw.ctx.m_instance, &deviceCount, null));
     if (deviceCount == 0) return error.NoVulkanGPU;
 
     const devices = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkPhysicalDevice, deviceCount);
     defer zvkw.ctx.zallocator.free(devices);
-    _ = zvkw.zvk.vkEnumeratePhysicalDevices(zvkw.ctx.m_instance, &deviceCount, devices.ptr);
+    try check(zvkw.zvk.vkEnumeratePhysicalDevices(zvkw.ctx.m_instance, &deviceCount, devices.ptr));
 
     var bestScore: u32 = 0;
     var bestDevice: zvkw.zvk.VkPhysicalDevice = null;
@@ -159,10 +158,10 @@ fn pickPhysicalDevice() !void {
     for (devices) |device| {
         // must support swapchain
         var extCount: u32 = 0;
-        _ = zvkw.zvk.vkEnumerateDeviceExtensionProperties(device, null, &extCount, null);
+        try check(zvkw.zvk.vkEnumerateDeviceExtensionProperties(device, null, &extCount, null));
         const exts = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkExtensionProperties, extCount);
         defer zvkw.ctx.zallocator.free(exts);
-        _ = zvkw.zvk.vkEnumerateDeviceExtensionProperties(device, null, &extCount, exts.ptr);
+        try check(zvkw.zvk.vkEnumerateDeviceExtensionProperties(device, null, &extCount, exts.ptr));
         var hasSwapchain = false;
         for (exts) |ext| {
             if (std.mem.eql(u8, std.mem.sliceTo(&ext.extensionName, 0), "VK_KHR_swapchain")) {
@@ -186,7 +185,7 @@ fn pickPhysicalDevice() !void {
         for (qfams, 0..) |fam, qi| {
             const hasGraphics = fam.queueFlags & zvkw.zvk.VK_QUEUE_GRAPHICS_BIT != 0;
             var presentSupport: zvkw.zvk.VkBool32 = zvkw.zvk.VK_FALSE;
-            _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceSupportKHR(device, @intCast(qi), zvkw.ctx.m_surface, &presentSupport);
+            try check(zvkw.zvk.vkGetPhysicalDeviceSurfaceSupportKHR(device, @intCast(qi), zvkw.ctx.m_surface, &presentSupport));
             if (hasGraphics and presentSupport == zvkw.zvk.VK_TRUE) {
                 graphicsPresentFamily = @intCast(qi);
                 break;
@@ -550,7 +549,7 @@ fn createCommandPool() !void {
     result = zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocCI, &zvkw.ctx.commandBuffers);
     if (result != zvkw.zvk.VK_SUCCESS) return error.AllocateCommandBuffersFailed;
 }
-pub fn render(matrices: cs.CameraMatrices) !void {
+pub fn render(matrices: cs.CameraMatrices, reg: *rgstry.Registry, render_system: *rs) !void {
     try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
 
     // Window-driven resize: not all WSI platforms report VK_ERROR_OUT_OF_DATE_KHR
@@ -658,7 +657,7 @@ pub fn render(matrices: cs.CameraMatrices) !void {
     };
     zvkw.zvk.vkCmdSetScissor(cb, 0, 1, &scissor);
     zvkw.zvk.vkCmdBindPipeline(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipeline);
-    try renderSystem.update(registry, cb);
+    try render_system.update(reg, cb);
     zvkw.zvk.vkCmdEndRendering(cb);
 
     const barrierPresent = zvkw.zvk.VkImageMemoryBarrier2{
@@ -926,22 +925,12 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
     const slot = zvkw.ctx.textureCount;
     if (slot >= zvkw.MAX_TEXTURES) return error.TextureHeapFull;
     const imageSize: zvkw.zvk.VkDeviceSize = width * height * 4;
-    var stagingBuffer: zvkw.zvk.VkBuffer = null;
-    var stagingAllocation: zvkw.vma.VmaAllocation = null;
-    const stagingBufferCI = zvkw.zvk.VkBufferCreateInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = imageSize,
-        .usage = zvkw.zvk.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-    };
-    const stagingAllocCI = zvkw.vma.VmaAllocationCreateInfo{
-        .flags = zvkw.vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-            zvkw.vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
-    };
-    var stagingAllocInfo: zvkw.vma.VmaAllocationInfo = undefined;
-    try check(zvkw.vma.vmaCreateBuffer(zvkw.ctx.vmaAllocator, @ptrCast(&stagingBufferCI), &stagingAllocCI, @ptrCast(&stagingBuffer), &stagingAllocation, &stagingAllocInfo));
-    defer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(stagingBuffer), stagingAllocation);
-    const dst: [*]u8 = @ptrCast(stagingAllocInfo.pMappedData.?);
+    
+    // --- Staging buffer (CPU writable) ---
+    const staging = try upload.createStagingBuffer(imageSize);
+    defer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(staging.buffer), staging.allocation);
+    
+    const dst: [*]u8 = @ptrCast(staging.allocInfo.pMappedData.?);
     @memcpy(dst[0..imageSize], pixels[0..imageSize]);
     const imageCI = zvkw.zvk.VkImageCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -960,20 +949,10 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
         .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
     };
     try check(zvkw.vma.vmaCreateImage(zvkw.ctx.vmaAllocator, @ptrCast(&imageCI), &imageAllocCI, @ptrCast(&zvkw.ctx.textureSlots[slot].image), &zvkw.ctx.textureSlots[slot].allocation, null));
-    var cb: zvkw.zvk.VkCommandBuffer = null;
-    const cbAllocCI = zvkw.zvk.VkCommandBufferAllocateInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = zvkw.ctx.commandPool,
-        .level = zvkw.zvk.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    try check(zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocCI, &cb));
+    
+    // --- One-time command buffer ---
+    const cb = try upload.beginOneTimeCommandBuffer();
     defer zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cb);
-    const beginInfo = zvkw.zvk.VkCommandBufferBeginInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    try check(zvkw.zvk.vkBeginCommandBuffer(cb, &beginInfo));
     const toTransferBarrier = zvkw.zvk.VkImageMemoryBarrier2{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_NONE,
@@ -1010,7 +989,7 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
         .imageOffset = .{ .x = 0, .y = 0, .z = 0 },
         .imageExtent = .{ .width = width, .height = height, .depth = 1 },
     };
-    zvkw.zvk.vkCmdCopyBufferToImage(cb, stagingBuffer, zvkw.ctx.textureSlots[slot].image, zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+    zvkw.zvk.vkCmdCopyBufferToImage(cb, @ptrCast(staging.buffer), zvkw.ctx.textureSlots[slot].image, zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
     const toShaderBarrier = zvkw.zvk.VkImageMemoryBarrier2{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
         .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_COPY_BIT,
@@ -1035,6 +1014,8 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
     };
     zvkw.zvk.vkCmdPipelineBarrier2(cb, &toShaderDep);
     try check(zvkw.zvk.vkEndCommandBuffer(cb));
+    
+    // --- Submit and wait ---
     const submitInfo = zvkw.zvk.VkSubmitInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,

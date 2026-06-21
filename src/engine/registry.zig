@@ -16,6 +16,7 @@ pub const EntityDestroyedFn = *const fn (ctx: *anyopaque, entity: Entity) void;
 pub const Registry = struct {
     freeList: std.ArrayList(u32) = .empty,
     generations: std.ArrayList(u32) = .empty,
+    component_masks: std.ArrayList(u64) = .empty,
     nextEntityIndex: u32 = 0,
     registry_allocator: std.mem.Allocator = undefined,
     MAX_ENTITIES: u32 = 0, // 2^24 entities
@@ -37,6 +38,7 @@ pub const Registry = struct {
         std.log.info("Initializing Registry", .{});
         self.freeList = .empty;
         self.generations = .empty;
+        self.component_masks = .empty;
         self.registry_allocator = allocator;
         self.nextEntityIndex = 0;
         self.MAX_ENTITIES = 1_000_000; // 2^24 entities
@@ -51,6 +53,7 @@ pub const Registry = struct {
         }
         self.freeList.deinit(self.registry_allocator);
         self.generations.deinit(self.registry_allocator);
+        self.component_masks.deinit(self.registry_allocator);
 
         std.log.info("Registry Offline", .{});
     }
@@ -64,6 +67,7 @@ pub const Registry = struct {
                 return error.MaxEntitiesReached;
             }
             try self.generations.append(self.registry_allocator, 0); // Initialize generation for new entity
+            try self.component_masks.append(self.registry_allocator, 0); // Initialize component mask
             self.nextEntityIndex += 1;
         }
         const generation = self.generations.items[entityIndex];
@@ -75,8 +79,17 @@ pub const Registry = struct {
             return error.InvalidEntityIndex;
         }
         if (self.destroy_fn) |func| func(self.destroy_ctx.?, entity);
-        self.generations.items[index] += 1; // Increment generation to invalidate old references
-        try self.freeList.append(self.registry_allocator, index); // Add index back to free list
+        // Check for generation overflow - if adding 1 would wrap to 0, don't recycle this index
+        if (self.generations.items[index] == std.math.maxInt(u32)) {
+            // Generation would overflow - permanently retire this index
+            self.generations.items[index] += 1; // Wraps to 0, making the index permanently invalid
+            self.component_masks.items[index] = 0; // Clear component mask
+            // Don't add to freeList - this index is now dead forever
+        } else {
+            self.generations.items[index] += 1; // Increment generation to invalidate old references
+            self.component_masks.items[index] = 0; // Clear component mask
+            try self.freeList.append(self.registry_allocator, index); // Add index back to free list
+        }
         inline for (0..self.storage.len) |i| {
             const C = @TypeOf(self.storage[i]).ComponentType;
             if (@hasDecl(C, "deinit")) {
@@ -101,6 +114,16 @@ pub const Registry = struct {
         const T = @TypeOf(component);
         const idx = comptime indexOfType(T);
         try self.storage[idx].attachComponent(self.registry_allocator, entity, component);
+        // Set component bit in mask
+        const bit: u64 = @intFromEnum(comptime componentBit(T));
+        self.component_masks.items[entity.index] |= bit;
+    }
+    fn componentBit(comptime T: type) @import("entity.zig").ComponentBits {
+        if (T == components.MeshComponent) return .Mesh;
+        if (T == components.TransformComponent) return .Transform;
+        if (T == components.CameraComponent) return .Camera;
+        if (T == components.TextureComponent) return .Texture;
+        @compileError("Unknown component type");
     }
     fn indexOfType(comptime T: type) comptime_int {
         inline for (components.AllComponents, 0..) |C, i| {
@@ -112,25 +135,35 @@ pub const Registry = struct {
         return struct {
             registry: *Registry,
             current: usize = 0,
+            mask: u64 = undefined,
+            
+            pub fn init(registry: *Registry) @This() {
+                var mask: u64 = 0;
+                inline for (Types) |T| {
+                    mask |= @intFromEnum(comptime componentBit(T));
+                }
+                return .{ .registry = registry, .mask = mask };
+            }
+            
             pub fn next(self: *@This()) ?Entity {
                 const primary = &self.registry.storage[indexOfType(Types[0])];
                 while (self.current < primary.dense.items.len) {
                     const entity_id = primary.entities.items[self.current];
                     self.current += 1;
-                    var found = true;
-                    inline for (1..Types.len) |i| {
-                        if (self.registry.storage[indexOfType(Types[i])].getByIndex(entity_id) == null) {
-                            found = false;
+                    // Use bitset to check if entity has all required components
+                    if (entity_id < self.registry.component_masks.items.len) {
+                        const entity_mask = self.registry.component_masks.items[entity_id];
+                        if ((entity_mask & self.mask) == self.mask) {
+                            return Entity.make(entity_id, self.registry.generations.items[entity_id]);
                         }
                     }
-                    if (found) return Entity.make(entity_id, self.registry.generations.items[entity_id]);
                 }
                 return null;
             }
         };
     }
     pub fn Query(self: *Registry, comptime Types: anytype) QueryIterator(Types) {
-        return QueryIterator(Types){ .registry = self };
+        return QueryIterator(Types).init(self);
     }
     pub fn get(self: *Registry, comptime T: type, entity_id: u32) ?*T {
         return self.storage[indexOfType(T)].getByIndex(entity_id);
@@ -169,7 +202,7 @@ test "attach and destroy cleans storage" {
     const idx = try std.testing.allocator.alloc(u32, 1);
     idx[0] = 0;
 
-    try reg.attach(entity, components.MeshComponent{ .vertices = verts, .indices = idx });
+    try reg.attach(entity, components.MeshComponent{ .vertices = verts, .indices = idx, .owns_memory = true });
     try std.testing.expect(reg.get(components.MeshComponent, entity.index) != null);
 
     try reg.destroyEntity(entity);
@@ -293,7 +326,7 @@ test "entity recycling produces different mesh pointers" {
     idxB[0] = 0;
 
     const e1 = try reg.createEntity();
-    try reg.attach(e1, components.MeshComponent{ .vertices = vertsA, .indices = idxA });
+    try reg.attach(e1, components.MeshComponent{ .vertices = vertsA, .indices = idxA, .owns_memory = true });
 
     const ptr1 = reg.get(components.MeshComponent, e1.index).?.vertices.ptr;
 
@@ -303,7 +336,7 @@ test "entity recycling produces different mesh pointers" {
     try std.testing.expectEqual(e1.index, e2.index); // same index, recycled
     try std.testing.expect(e1.generation != e2.generation); // different generation
 
-    try reg.attach(e2, components.MeshComponent{ .vertices = vertsB, .indices = idxB });
+    try reg.attach(e2, components.MeshComponent{ .vertices = vertsB, .indices = idxB, .owns_memory = true });
 
     const ptr2 = reg.get(components.MeshComponent, e2.index).?.vertices.ptr;
 

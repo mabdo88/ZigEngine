@@ -101,16 +101,19 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
-    const ecs_module = b.createModule(.{
-        .root_source_file = b.path("src/engine/ecs_test.zig"),
-        .target = target,
-        .optimize = optimize,
+    // ECS tests - GPU-free, minimal module
+    // Use zig test directly to avoid --listen flag issues
+    const ecs_test_cmd = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "test",
+        "src/ecs_test.zig",
+        "-ODebug",
+        "--cache-dir",
+        ".zig-cache",
+        "--global-cache-dir",
+        b.graph.global_cache_root.path orelse "",
     });
-    const ecs_tests = b.addTest(.{
-        .root_module = ecs_module,
-    });
-    const run_ecs_tests = b.addRunArtifact(ecs_tests);
     const ecs_test_step = b.step("test-ecs", "Run ECS tests");
-    ecs_test_step.dependOn(&run_ecs_tests.step);
-    test_step.dependOn(&run_ecs_tests.step);
+    ecs_test_step.dependOn(&ecs_test_cmd.step);
+    test_step.dependOn(&ecs_test_cmd.step);
 }

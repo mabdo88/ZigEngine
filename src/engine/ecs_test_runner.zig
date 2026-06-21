@@ -1,5 +1,6 @@
 const std = @import("std");
-// GPU-free test surface: pure ECS + math, no Vulkan linkage required.
+
+// Import registry which contains the ECS tests
 comptime {
     _ = @import("registry.zig");
 }

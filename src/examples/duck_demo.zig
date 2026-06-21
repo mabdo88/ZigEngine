@@ -1,23 +1,23 @@
 //! Duck demo: loads and animates a glTF duck model
 const std = @import("std");
+const World = @import("../engine/world.zig").World;
 const Registry = @import("../engine/registry.zig").Registry;
 const Entity = @import("../engine/entity.zig").Entity;
 const component = @import("../components/components.zig");
-const systems = @import("../renderer/systems.zig");
 const mshLoader = @import("../resources/meshLoader.zig");
-const vkctx = @import("../renderer/zVulkanContext.zig");
 
 const duck_spin_dps: f32 = 60.0;
 
 pub const DuckDemo = struct {
     camera: Entity = .{},
     duck: Entity = .{},
-    registry: *Registry = undefined,
+    world: *World = undefined,
 
     /// Initialize the demo scene with camera and duck entities
-    pub fn init(self: *DuckDemo, registry: *Registry, allocator: std.mem.Allocator) !void {
+    pub fn init(self: *DuckDemo, world: *World, allocator: std.mem.Allocator) !void {
         std.log.info("Initializing Duck Demo...", .{});
-        self.registry = registry;
+        self.world = world;
+        const registry = world.registryPtr();
 
         // Create camera
         self.camera = try registry.createEntity();
@@ -26,7 +26,7 @@ pub const DuckDemo = struct {
         // Create duck entity
         self.duck = try registry.createEntity();
         const gltfResult = try mshLoader.loadgltf(allocator, "assets/duck/scene.gltf");
-        const textureIndex = try systems.renderer.uploadTexture(gltfResult.pixels, gltfResult.width, gltfResult.height);
+        const textureIndex = try world.uploadTexture(gltfResult.pixels, gltfResult.width, gltfResult.height);
         allocator.free(gltfResult.pixels);
 
         try registry.attach(self.duck, gltfResult.mesh);
@@ -42,14 +42,16 @@ pub const DuckDemo = struct {
 
     /// Update demo logic (duck spinning animation)
     pub fn update(self: *DuckDemo, dt: f32) void {
-        if (self.registry.get(component.TransformComponent, self.duck.index)) |transform| {
+        const registry = self.world.registryPtr();
+        if (registry.get(component.TransformComponent, self.duck.index)) |transform| {
             transform.rotation[1] = @mod(transform.rotation[1] + duck_spin_dps * dt, 360.0);
         }
     }
 
     /// Cleanup demo entities
     pub fn deinit(self: *DuckDemo) void {
-        self.registry.destroyEntity(self.camera) catch |err| std.log.err("destroyEntity(camera) failed: {s}", .{@errorName(err)});
-        self.registry.destroyEntity(self.duck) catch |err| std.log.err("destroyEntity(duck) failed: {s}", .{@errorName(err)});
+        const registry = self.world.registryPtr();
+        registry.destroyEntity(self.camera) catch |err| std.log.err("destroyEntity(camera) failed: {s}", .{@errorName(err)});
+        registry.destroyEntity(self.duck) catch |err| std.log.err("destroyEntity(duck) failed: {s}", .{@errorName(err)});
     }
 };

@@ -4,6 +4,7 @@ const components = @import("../components/components.zig");
 const Registry = @import("../engine/registry.zig").Registry;
 const Entity = @import("../engine/entity.zig").Entity;
 const cs = @import("cameraSystem.zig");
+const upload = @import("upload.zig");
 
 /// Turns a VkResult into a Zig error so failed calls surface at the source.
 fn check(result: zvkw.zvk.VkResult) !void {
@@ -26,33 +27,10 @@ fn uploadToGpu(
     out_allocation: *zvkw.vma.VmaAllocation,
 ) !void {
     // --- Staging buffer (CPU writable) ---
-    const stagingCI = zvkw.zvk.VkBufferCreateInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = size,
-        .usage = zvkw.zvk.VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-    };
-    const stagingAllocCI = zvkw.vma.VmaAllocationCreateInfo{
-        .flags = zvkw.vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-            zvkw.vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT |
-            zvkw.vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
-        .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
-    };
+    const staging = try upload.createStagingBuffer(size);
+    defer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(staging.buffer), staging.allocation);
 
-    var stagingBuffer: zvkw.vma.VkBuffer = null;
-    var stagingAllocation: zvkw.vma.VmaAllocation = null;
-    var stagingInfo: zvkw.vma.VmaAllocationInfo = undefined;
-
-    if (zvkw.vma.vmaCreateBuffer(
-        zvkw.ctx.vmaAllocator,
-        @ptrCast(&stagingCI),
-        &stagingAllocCI,
-        @ptrCast(&stagingBuffer),
-        &stagingAllocation,
-        &stagingInfo,
-    ) != zvkw.zvk.VK_SUCCESS) return error.StagingBufferCreateFailed;
-    errdefer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, stagingBuffer, stagingAllocation);
-
-    @memcpy(@as([*]u8, @ptrCast(@alignCast(stagingInfo.pMappedData)))[0..size], @as([*]const u8, @ptrCast(data))[0..size]);
+    @memcpy(@as([*]u8, @ptrCast(@alignCast(staging.allocInfo.pMappedData)))[0..size], @as([*]const u8, @ptrCast(data))[0..size]);
 
     // --- Device-local GPU buffer ---
     const bufferCI = zvkw.zvk.VkBufferCreateInfo{
@@ -75,47 +53,16 @@ fn uploadToGpu(
     errdefer zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(out_buffer.*), out_allocation.*);
 
     // --- One-time command buffer ---
-    const cbAllocInfo = zvkw.zvk.VkCommandBufferAllocateInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = zvkw.ctx.commandPool,
-        .level = zvkw.zvk.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    var cmd: zvkw.zvk.VkCommandBuffer = null;
-    try check(zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocInfo, &cmd));
-    errdefer zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cmd);
-
-    const beginInfo = zvkw.zvk.VkCommandBufferBeginInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-    };
-    try check(zvkw.zvk.vkBeginCommandBuffer(cmd, &beginInfo));
+    const cmd = try upload.beginOneTimeCommandBuffer();
+    defer zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cmd);
 
     const copy = zvkw.zvk.VkBufferCopy{ .size = size };
-    zvkw.zvk.vkCmdCopyBuffer(cmd, @ptrCast(stagingBuffer), out_buffer.*, 1, &copy);
+    zvkw.zvk.vkCmdCopyBuffer(cmd, @ptrCast(staging.buffer), out_buffer.*, 1, &copy);
 
     try check(zvkw.zvk.vkEndCommandBuffer(cmd));
 
     // --- Submit and stall ---
-    const fenceCI = zvkw.zvk.VkFenceCreateInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-    };
-    var fence: zvkw.zvk.VkFence = null;
-    try check(zvkw.zvk.vkCreateFence(zvkw.ctx.m_Device, &fenceCI, null, &fence));
-    errdefer zvkw.zvk.vkDestroyFence(zvkw.ctx.m_Device, fence, null);
-
-    const submitInfo = zvkw.zvk.VkSubmitInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &cmd,
-    };
-    try check(zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, fence));
-    try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &fence, zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
-
-    // --- Cleanup ---
-    zvkw.zvk.vkDestroyFence(zvkw.ctx.m_Device, fence, null);
-    zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cmd);
-    zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, stagingBuffer, stagingAllocation);
+    try upload.submitAndWait(cmd);
 }
 fn uploadMesh(mesh: *const components.MeshComponent) !GpuMesh {
     var gpuMesh: GpuMesh = undefined;

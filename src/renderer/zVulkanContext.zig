@@ -51,7 +51,7 @@ pub const TextureSlot = struct {
 /// renderer functions later turns this into full dependency injection.
 pub const VulkanContext = struct {
     frame: f32 = 0.0,
-    extensions: [3][*c]const u8 = undefined,
+    extensions: []const [*c]const u8 = undefined,
     imageIndex: u32 = 0,
     frameIndex: u32 = 0,
     queueFamilyIndex: u32 = 0,
