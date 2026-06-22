@@ -16,12 +16,8 @@ pub const AllComponents = .{
 };
 
 pub const MeshComponent = struct {
-    /// Vertices slice. If `owns_memory` is true, Registry.destroyEntity frees it.
     vertices: []const Vertex,
-    /// Indices slice. If `owns_memory` is true, Registry.destroyEntity frees it.
     indices: []const u32,
-    /// When true, the registry frees vertices/indices on destroy. Set this only
-    /// when the slices were heap-allocated and the entity should own them.
     owns_memory: bool = false,
 
     pub fn isValid(self: MeshComponent) bool {
@@ -42,11 +38,10 @@ pub const Vertex = struct {
 
 pub const TransformComponent = struct {
     position: @Vector(3, f32),
-    rotation: @Vector(3, f32), // Euler (pitch, yaw, roll) in degrees
+    rotation: @Vector(3, f32),
     scale: @Vector(3, f32),
 };
 
-/// World-space transform as a full 4x4 column-major matrix.
 pub const WorldTransformComponent = struct {
     matrix: [4][4]f32,
 };
@@ -60,17 +55,10 @@ pub const CameraComponent = struct {
     far: f32 = 10000.0,
 };
 
-/// GPU-side texture handle: the bindless slot index. Written by render_system
-/// after it uploads the corresponding TextureDataComponent. Read by the draw
-/// path (push constant).
 pub const TextureComponent = struct {
-    textureIndex: u32, // slot in the bindless heap
+    textureIndex: u32,
 };
 
-// ─── Scene components ───────────────────────────────────────────────────────
-
-/// A registered scene. Created up front (one entity per scene). Loaded lazily
-/// when tagged with ScenePendingTag.
 pub const SceneComponent = struct {
     name: []const u8,
     path: [:0]const u8,
@@ -79,28 +67,19 @@ pub const SceneComponent = struct {
     offset: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 },
 };
 
-/// Marks the currently loaded scene entity.
 pub const SceneActiveTag = struct {};
 
-/// Marks a scene requested to load on the next scene_system pass.
 pub const ScenePendingTag = struct {};
 
-/// Tags an entity as belonging to a scene, so unloading destroys exactly the
-/// entities that scene spawned.
 pub const SceneOwnedComponent = struct {
     owner: Entity,
 };
 
-/// Camera matrices computed by camera_system and consumed by render_system.
 pub const CameraMatricesComponent = struct {
     view: [4][4]f32,
     proj: [4][4]f32,
 };
 
-/// CPU-side texture data written by scene_system and uploaded lazily by
-/// render_system. To avoid double-freeing shared material pixels, only the
-/// first entity of a given material carries non-empty `pixels`; the rest carry
-/// just `material_id` (empty pixels). render_system frees pixels after upload.
 pub const TextureDataComponent = struct {
     material_id: u32,
     pixels: []u8 = &.{},

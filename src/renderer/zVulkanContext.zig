@@ -10,9 +10,6 @@ pub const validationLayers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
 pub const TextureHandle: type = u32;
 pub const MAX_TEXTURES: u32 = 1024;
 
-/// Single source of truth for the initial window size. Used as the default
-/// `WindowComponent` size and as the swapchain fallback when the surface does
-/// not dictate an extent.
 pub const default_window_width: u16 = 800;
 pub const default_window_height: u16 = 600;
 
@@ -47,9 +44,6 @@ pub const TextureSlot = struct {
     allocation: vma.VmaAllocation = null,
 };
 
-/// All mutable Vulkan state grouped into a single context object.
-/// A single instance (`ctx`) is shared today; passing `*VulkanContext` to the
-/// renderer functions later turns this into full dependency injection.
 pub const VulkanContext = struct {
     frame: f32 = 0.0,
     extensions: []const [*c]const u8 = undefined,
@@ -98,5 +92,4 @@ pub const VulkanContext = struct {
     textureCount: u32 = 0,
 };
 
-/// Shared Vulkan context instance.
 pub var ctx: VulkanContext = .{};

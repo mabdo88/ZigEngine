@@ -1,15 +1,15 @@
 const std = @import("std");
 const Registry = @import("../entity/registry.zig").Registry;
 
-/// A system is a named, prioritized update function over the registry.
-/// Lower priority runs first (Input < Scene < Camera < Render).
 pub const System = struct {
     name: []const u8,
     priority: i32 = 0,
-    update_fn: *const fn (*Registry, f32) anyerror!void,
+    update_fn: *const fn (*Registry, *anyopaque, f32) anyerror!void,
+    init_fn: ?*const fn (*Registry, *anyopaque) anyerror!void = null,
+    deinit_fn: ?*const fn (*Registry, *anyopaque) void = null,
+    context: *anyopaque,
 };
 
-/// Owns the registered systems and runs them each frame in priority order.
 pub const SystemRunner = struct {
     systems: std.ArrayList(System) = .empty,
     allocator: std.mem.Allocator,
@@ -22,7 +22,6 @@ pub const SystemRunner = struct {
         self.systems.deinit(self.allocator);
     }
 
-    /// Register a system and keep the list sorted by ascending priority.
     pub fn addSystem(self: *SystemRunner, system: System) !void {
         try self.systems.append(self.allocator, system);
         std.mem.sort(System, self.systems.items, {}, struct {
@@ -32,9 +31,21 @@ pub const SystemRunner = struct {
         }.lessThan);
     }
 
+    pub fn initAll(self: *SystemRunner, registry: *Registry) !void {
+        for (self.systems.items) |system| {
+            if (system.init_fn) |f| try f(registry, system.context);
+        }
+    }
+
+    pub fn deinitAll(self: *SystemRunner, registry: *Registry) void {
+        for (self.systems.items) |system| {
+            if (system.deinit_fn) |f| f(registry, system.context);
+        }
+    }
+
     pub fn update(self: *SystemRunner, registry: *Registry, dt: f32) !void {
         for (self.systems.items) |system| {
-            try system.update_fn(registry, dt);
+            try system.update_fn(registry, system.context, dt);
         }
     }
 };

@@ -21853,9 +21853,6 @@ pub fn vkWindowShouldClose(window: *const VkWindow) bool {
     return window.should_close;
 }
 
-/// Returns true if the window was resized since the flag was last cleared.
-/// The renderer polls this to trigger a swapchain rebuild, since relying solely
-/// on VK_ERROR_OUT_OF_DATE_KHR is not reliable across all WSI platforms.
 pub fn vkWindowResized(window: *const VkWindow) bool {
     return window.resized;
 }
@@ -21897,8 +21894,6 @@ pub fn vkPollEvents() void {
     }
 }
 
-/// Monotonic time in seconds since an arbitrary epoch, used for frame timing.
-/// Backed by QueryPerformanceCounter on Windows and CLOCK_MONOTONIC elsewhere.
 pub fn vkGetTime() f64 {
     if (builtin.os.tag == .windows) {
         var freq: i64 = 0;
@@ -21933,8 +21928,6 @@ pub fn vkCreateWindowSurface(window: *const VkWindow, instance: VkInstance) !VkS
     return surface;
 }
 
-/// Returns the required Vulkan instance extensions as a slice.
-/// In Debug builds, VK_EXT_debug_utils is included automatically.
 pub fn vkGetRequiredInstanceExtensions(allocator: std.mem.Allocator) ![]const [*c]const u8 {
     var extensions = try allocator.alloc([*c]const u8, if (builtin.mode == .Debug) 3 else 2);
     extensions[0] = "VK_KHR_surface";

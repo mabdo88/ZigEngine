@@ -1,8 +1,3 @@
-//! VulkanWorld: a concrete World. It only spawns entities with components and
-//! registers systems — no scene logic, no rendering logic. Scene logic lives in
-//! scene_system; all Vulkan lives behind render_system. To target a different
-//! renderer, copy this file and swap the render_system import + init call.
-
 const std = @import("std");
 const Registry = @import("ecs/entity/registry.zig").Registry;
 const sysmod = @import("ecs/systems/system.zig");
@@ -10,12 +5,13 @@ const System = sysmod.System;
 const SystemRunner = sysmod.SystemRunner;
 const components = @import("ecs/components/components.zig");
 const window = @import("../platform/window.zig");
-const vkctx = @import("../renderer/zVulkanContext.zig");
+const config_mod = @import("config.zig");
 
 const input_system = @import("ecs/systems/input_system.zig");
 const scene_system = @import("ecs/systems/scene_system.zig");
 const camera_system = @import("ecs/systems/camera_system.zig");
 const render_system = @import("ecs/systems/render_system.zig");
+const movement_system = @import("ecs/systems/movement_system.zig");
 
 pub const VulkanWorld = struct {
     registry: Registry,
@@ -23,94 +19,95 @@ pub const VulkanWorld = struct {
     allocator: std.mem.Allocator,
     last_time: f64,
 
-    pub fn init(allocator: std.mem.Allocator) !VulkanWorld {
-        var self = VulkanWorld{
+    render_state: render_system.RenderSystemState,
+    input_state: input_system.InputSystemState,
+    camera_state: camera_system.CameraSystemState,
+    scene_state: scene_system.SceneSystemState,
+    movement_state: movement_system.MovementSystemState,
+
+    pub fn init(self: *VulkanWorld, allocator: std.mem.Allocator, config: config_mod.Config) !void {
+        self.* = VulkanWorld{
             .registry = Registry.init(allocator),
             .system_runner = SystemRunner.init(allocator),
             .allocator = allocator,
             .last_time = 0,
+            .render_state = undefined,
+            .input_state = undefined,
+            .camera_state = undefined,
+            .scene_state = undefined,
+            .movement_state = undefined,
         };
 
-        // Initialize Vulkan + GPU (creates the window). No scene/upload happens
-        // here — the first scene loads on frame 1 via scene_system.
-        try render_system.init(
+        try self.render_state.init(
             allocator,
             &self.registry,
-            "ZVulkan Window",
-            vkctx.default_window_width,
-            vkctx.default_window_height,
+            config.window_title,
+            config.window_width,
+            config.window_height,
         );
-        // Hand the window to the input system for key reads.
-        input_system.init(render_system.windowPtr());
 
-        try self.spawnScenes();
-        try self.spawnCamera();
+        self.input_state = .{ .win = render_system.RenderSystemState.windowPtr() };
+        self.camera_state = .{ .aspect = render_system.RenderSystemState.aspectRatio() };
+        self.scene_state = .{};
+        self.movement_state = .{};
+
+        try self.registry.events.subscribe(.scene_unloaded, @ptrCast(&self.render_state), render_system.RenderSystemState.onSceneUnloaded);
+
+        try self.spawnScenes(config.scenes);
+        try self.spawnCamera(config.camera);
         try self.registerSystems();
 
-        // Tag the first scene to load on frame 1.
         var scene_it = self.registry.Query(.{components.SceneComponent});
         if (scene_it.next()) |first_scene| {
             try self.registry.set(first_scene, components.ScenePendingTag{});
         }
 
         self.last_time = window.getTime();
-        return self;
     }
 
-    /// Spawn one entity per registered scene (loop over an array — no one-by-one).
-    fn spawnScenes(self: *VulkanWorld) !void {
-        const scenes = [_]components.SceneComponent{
-            .{
-                .name = "Duck",
-                .path = "assets/duck/scene.gltf",
-                .camera_position = .{ 0.0, 0.5, 3.0 },
-                .camera_target = .{ 0.0, 0.5, 0.0 },
-                .offset = .{ 0.0, -25.0, -100.0 },
-            },
-            .{
-                .name = "House",
-                .path = "assets/House/hillside_retreat__concrete_house_concept/scene.gltf",
-                .camera_position = .{ 0.0, 0.5, 3.0 },
-                .camera_target = .{ 0.0, 0.5, 0.0 },
-                .offset = .{ 0.0, -3.0, -40.0 },
-            },
-        };
-        for (scenes) |scene| {
+    fn spawnScenes(self: *VulkanWorld, scene_configs: []const config_mod.Config.SceneConfig) !void {
+        for (scene_configs) |sc| {
             const entity = try self.registry.create();
-            try self.registry.add(entity, scene);
+            try self.registry.add(entity, components.SceneComponent{
+                .name = sc.name,
+                .path = sc.path,
+                .camera_position = sc.camera_position,
+                .camera_target = sc.camera_target,
+                .offset = sc.offset,
+            });
         }
     }
 
-    /// Spawn the single persistent camera entity. Never destroyed on scene swap.
-    fn spawnCamera(self: *VulkanWorld) !void {
+    fn spawnCamera(self: *VulkanWorld, cam: config_mod.Config.CameraConfig) !void {
         const camera = try self.registry.create();
         try self.registry.add(camera, components.CameraComponent{
-            .position = .{ 0.0, 0.5, 3.0 },
-            .target = .{ 0.0, 0.5, 0.0 },
-            .near = 0.01,
-            .far = 1000.0,
+            .position = cam.position,
+            .target = cam.target,
+            .near = cam.near,
+            .far = cam.far,
         });
     }
 
-    /// Register systems (loop over an array). Priority order: Input < Scene < Camera < Render.
     fn registerSystems(self: *VulkanWorld) !void {
         const systems = [_]System{
-            .{ .name = "Input", .priority = -100, .update_fn = input_system.update },
-            .{ .name = "Scene", .priority = 0, .update_fn = scene_system.update },
-            .{ .name = "Camera", .priority = 1, .update_fn = camera_system.update },
-            .{ .name = "Render", .priority = 100, .update_fn = render_system.update },
+            .{ .name = "Input", .priority = -100, .update_fn = input_system.update, .context = @ptrCast(&self.input_state) },
+            .{ .name = "Scene", .priority = 0, .update_fn = scene_system.update, .context = @ptrCast(&self.scene_state) },
+            .{ .name = "Movement", .priority = 1, .update_fn = movement_system.update, .context = @ptrCast(&self.movement_state) },
+            .{ .name = "Camera", .priority = 2, .update_fn = camera_system.update, .context = @ptrCast(&self.camera_state) },
+            .{ .name = "Render", .priority = 100, .update_fn = render_system.update, .context = @ptrCast(&self.render_state) },
         };
         for (systems) |s| try self.system_runner.addSystem(s);
     }
 
     pub fn update(self: *VulkanWorld, dt: f32) !void {
         window.pollEvents();
+        self.camera_state.aspect = render_system.RenderSystemState.aspectRatio();
         try self.system_runner.update(&self.registry, dt);
     }
 
     pub fn shouldClose(self: *VulkanWorld) bool {
         _ = self;
-        return render_system.shouldClose();
+        return render_system.RenderSystemState.shouldClose();
     }
 
     pub fn deltaTime(self: *VulkanWorld) f32 {
@@ -121,7 +118,7 @@ pub const VulkanWorld = struct {
     }
 
     pub fn deinit(self: *VulkanWorld) void {
-        render_system.deinit(&self.registry);
+        self.render_state.deinit(&self.registry);
         self.system_runner.deinit();
         self.registry.deinit();
     }

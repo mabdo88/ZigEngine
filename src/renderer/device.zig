@@ -5,10 +5,10 @@ fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
 }
 
-pub fn setupDebugMessenger() void {
+pub fn setupDebugMessenger(ctx: *zvkw.VulkanContext) void {
     if (zvkw.enable_validation) {
-        zvkw.ctx.vkCreateDebugUtilsMessengerEXT = @ptrCast(zvkw.zvk.vkGetInstanceProcAddr(zvkw.ctx.m_instance, "vkCreateDebugUtilsMessengerEXT"));
-        zvkw.ctx.vkDestroyDebugUtilsMessengerEXT = @ptrCast(zvkw.zvk.vkGetInstanceProcAddr(zvkw.ctx.m_instance, "vkDestroyDebugUtilsMessengerEXT"));
+        ctx.vkCreateDebugUtilsMessengerEXT = @ptrCast(zvkw.zvk.vkGetInstanceProcAddr(ctx.m_instance, "vkCreateDebugUtilsMessengerEXT"));
+        ctx.vkDestroyDebugUtilsMessengerEXT = @ptrCast(zvkw.zvk.vkGetInstanceProcAddr(ctx.m_instance, "vkDestroyDebugUtilsMessengerEXT"));
         const debugCI = zvkw.zvk.VkDebugUtilsMessengerCreateInfoEXT{
             .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
             .messageSeverity = zvkw.zvk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
@@ -19,7 +19,7 @@ pub fn setupDebugMessenger() void {
                 zvkw.zvk.VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
             .pfnUserCallback = debugCallback,
         };
-        const result = zvkw.ctx.vkCreateDebugUtilsMessengerEXT.?(zvkw.ctx.m_instance, &debugCI, null, &zvkw.ctx.m_debugMessenger);
+        const result = ctx.vkCreateDebugUtilsMessengerEXT.?(ctx.m_instance, &debugCI, null, &ctx.m_debugMessenger);
         if (result != zvkw.zvk.VK_SUCCESS) {
             std.log.err("Failed to set up debug messenger", .{});
         } else {
@@ -28,14 +28,14 @@ pub fn setupDebugMessenger() void {
     }
 }
 
-pub fn pickPhysicalDevice() !void {
+pub fn pickPhysicalDevice(ctx: *zvkw.VulkanContext) !void {
     var deviceCount: u32 = 0;
-    try check(zvkw.zvk.vkEnumeratePhysicalDevices(zvkw.ctx.m_instance, &deviceCount, null));
+    try check(zvkw.zvk.vkEnumeratePhysicalDevices(ctx.m_instance, &deviceCount, null));
     if (deviceCount == 0) return error.NoVulkanGPU;
 
-    const devices = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkPhysicalDevice, deviceCount);
-    defer zvkw.ctx.zallocator.free(devices);
-    try check(zvkw.zvk.vkEnumeratePhysicalDevices(zvkw.ctx.m_instance, &deviceCount, devices.ptr));
+    const devices = try ctx.zallocator.alloc(zvkw.zvk.VkPhysicalDevice, deviceCount);
+    defer ctx.zallocator.free(devices);
+    try check(zvkw.zvk.vkEnumeratePhysicalDevices(ctx.m_instance, &deviceCount, devices.ptr));
 
     var bestScore: u32 = 0;
     var bestDevice: zvkw.zvk.VkPhysicalDevice = null;
@@ -44,8 +44,8 @@ pub fn pickPhysicalDevice() !void {
     for (devices) |device| {
         var extCount: u32 = 0;
         try check(zvkw.zvk.vkEnumerateDeviceExtensionProperties(device, null, &extCount, null));
-        const exts = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkExtensionProperties, extCount);
-        defer zvkw.ctx.zallocator.free(exts);
+        const exts = try ctx.zallocator.alloc(zvkw.zvk.VkExtensionProperties, extCount);
+        defer ctx.zallocator.free(exts);
         try check(zvkw.zvk.vkEnumerateDeviceExtensionProperties(device, null, &extCount, exts.ptr));
         var hasSwapchain = false;
         for (exts) |ext| {
@@ -60,14 +60,14 @@ pub fn pickPhysicalDevice() !void {
         }
         var qfCount: u32 = 0;
         zvkw.zvk.vkGetPhysicalDeviceQueueFamilyProperties(device, &qfCount, null);
-        const qfams = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkQueueFamilyProperties, qfCount);
-        defer zvkw.ctx.zallocator.free(qfams);
+        const qfams = try ctx.zallocator.alloc(zvkw.zvk.VkQueueFamilyProperties, qfCount);
+        defer ctx.zallocator.free(qfams);
         zvkw.zvk.vkGetPhysicalDeviceQueueFamilyProperties(device, &qfCount, qfams.ptr);
         var graphicsPresentFamily: ?u32 = null;
         for (qfams, 0..) |fam, qi| {
             const hasGraphics = fam.queueFlags & zvkw.zvk.VK_QUEUE_GRAPHICS_BIT != 0;
             var presentSupport: zvkw.zvk.VkBool32 = zvkw.zvk.VK_FALSE;
-            try check(zvkw.zvk.vkGetPhysicalDeviceSurfaceSupportKHR(device, @intCast(qi), zvkw.ctx.m_surface, &presentSupport));
+            try check(zvkw.zvk.vkGetPhysicalDeviceSurfaceSupportKHR(device, @intCast(qi), ctx.m_surface, &presentSupport));
             if (hasGraphics and presentSupport == zvkw.zvk.VK_TRUE) {
                 graphicsPresentFamily = @intCast(qi);
                 break;
@@ -105,19 +105,19 @@ pub fn pickPhysicalDevice() !void {
     }
 
     if (bestDevice == null) return error.NoSuitableGPU;
-    zvkw.ctx.m_physicalDevice = bestDevice;
-    zvkw.ctx.queueFamilyIndex = bestQueueFamily;
+    ctx.m_physicalDevice = bestDevice;
+    ctx.queueFamilyIndex = bestQueueFamily;
 
     var props: zvkw.zvk.VkPhysicalDeviceProperties = undefined;
-    zvkw.zvk.vkGetPhysicalDeviceProperties(zvkw.ctx.m_physicalDevice, &props);
+    zvkw.zvk.vkGetPhysicalDeviceProperties(ctx.m_physicalDevice, &props);
     std.log.info("Selected GPU: {s}", .{props.deviceName});
 }
 
-pub fn createLogicalDevice() !void {
+pub fn createLogicalDevice(ctx: *zvkw.VulkanContext) !void {
     const priority: f32 = 1.0;
     const queueCI = zvkw.zvk.VkDeviceQueueCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-        .queueFamilyIndex = zvkw.ctx.queueFamilyIndex,
+        .queueFamilyIndex = ctx.queueFamilyIndex,
         .queueCount = 1,
         .pQueuePriorities = &priority,
     };
@@ -155,12 +155,12 @@ pub fn createLogicalDevice() !void {
         .ppEnabledExtensionNames = &deviceExtensions,
         .pEnabledFeatures = &vk10Features,
     };
-    const result = zvkw.zvk.vkCreateDevice(zvkw.ctx.m_physicalDevice, &deviceCI, null, &zvkw.ctx.m_Device);
+    const result = zvkw.zvk.vkCreateDevice(ctx.m_physicalDevice, &deviceCI, null, &ctx.m_Device);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDeviceFailed;
-    zvkw.zvk.vkGetDeviceQueue(zvkw.ctx.m_Device, zvkw.ctx.queueFamilyIndex, 0, &zvkw.ctx.queue);
+    zvkw.zvk.vkGetDeviceQueue(ctx.m_Device, ctx.queueFamilyIndex, 0, &ctx.queue);
 }
 
-pub fn createAllocator() !void {
+pub fn createAllocator(ctx: *zvkw.VulkanContext) !void {
     const vkfunctions = zvkw.vma.VmaVulkanFunctions{
         .vkGetInstanceProcAddr = @ptrCast(&zvkw.zvk.vkGetInstanceProcAddr),
         .vkGetDeviceProcAddr = @ptrCast(&zvkw.zvk.vkGetDeviceProcAddr),
@@ -168,12 +168,12 @@ pub fn createAllocator() !void {
     };
     const allocatorCI = zvkw.vma.VmaAllocatorCreateInfo{
         .flags = zvkw.vma.VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-        .physicalDevice = @ptrCast(zvkw.ctx.m_physicalDevice),
-        .device = @ptrCast(zvkw.ctx.m_Device),
+        .physicalDevice = @ptrCast(ctx.m_physicalDevice),
+        .device = @ptrCast(ctx.m_Device),
         .pVulkanFunctions = &vkfunctions,
-        .instance = @ptrCast(zvkw.ctx.m_instance),
+        .instance = @ptrCast(ctx.m_instance),
     };
-    const result = zvkw.vma.vmaCreateAllocator(&allocatorCI, &zvkw.ctx.vmaAllocator);
+    const result = zvkw.vma.vmaCreateAllocator(&allocatorCI, &ctx.vmaAllocator);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateAllocatorFailed;
 }
 

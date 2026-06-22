@@ -20,7 +20,6 @@ pub fn ComponentStorage(comptime T: type) type {
             while (self.sparse.items.len <= entity.index) {
                 try self.sparse.append(allocator, EMPTY);
             }
-            // If the entity already has this component, overwrite in place (upsert).
             const existing = self.sparse.items[entity.index];
             if (existing != EMPTY) {
                 self.dense.items[existing] = component;

@@ -2,6 +2,9 @@ const std = @import("std");
 const Entity = @import("entity.zig").Entity;
 const compstrg = @import("componentStorage.zig");
 const components = @import("../components/components.zig");
+const entity_mod = @import("entity.zig");
+const event = @import("../event.zig");
+
 fn StorageType() type {
     var types: [components.AllComponents.len]type = undefined;
     inline for (components.AllComponents, 0..) |C, i| {
@@ -9,10 +12,6 @@ fn StorageType() type {
     }
     return std.meta.Tuple(&types);
 }
-/// Called when an entity is destroyed, so external owners of per-entity
-/// resources (e.g. the renderer's GPU buffers) can release them. `ctx` is the
-/// opaque pointer registered via `setDestroyHook`.
-pub const EntityDestroyedFn = *const fn (ctx: *anyopaque, entity: Entity) void;
 pub const Registry = struct {
     freeList: std.ArrayList(u32) = .empty,
     generations: std.ArrayList(u32) = .empty,
@@ -21,15 +20,14 @@ pub const Registry = struct {
     registry_allocator: std.mem.Allocator = undefined,
     MAX_ENTITIES: u32 = 0,
     storage: StorageType() = undefined,
-    destroy_ctx: ?*anyopaque = null,
-    destroy_fn: ?EntityDestroyedFn = null,
+    events: event.EventBus = undefined,
 
-    /// Construct an initialized registry. Caller owns it and must call deinit.
     pub fn init(allocator: std.mem.Allocator) Registry {
         std.log.info("Initializing Registry", .{});
         var self = Registry{};
         self.registry_allocator = allocator;
         self.MAX_ENTITIES = 1_000_000;
+        self.events = event.EventBus.init(allocator);
         inline for (0..self.storage.len) |i| {
             self.storage[i] = .{};
         }
@@ -37,14 +35,6 @@ pub const Registry = struct {
         return self;
     }
 
-    pub fn setDestroyHook(self: *Registry, ctx: *anyopaque, func: EntityDestroyedFn) void {
-        self.destroy_ctx = ctx;
-        self.destroy_fn = func;
-    }
-    pub fn clearDestroyHook(self: *Registry) void {
-        self.destroy_ctx = null;
-        self.destroy_fn = null;
-    }
     pub fn aliveCount(self: *Registry) usize {
         return self.nextEntityIndex - self.freeList.items.len;
     }
@@ -61,11 +51,11 @@ pub const Registry = struct {
         self.freeList.deinit(self.registry_allocator);
         self.generations.deinit(self.registry_allocator);
         self.component_masks.deinit(self.registry_allocator);
+        self.events.deinit();
 
         std.log.info("Registry Offline", .{});
     }
 
-    /// Allocate a new entity handle (recycling a freed index when possible).
     pub fn createEntity(self: *Registry) !Entity {
         var entityIndex: u32 = 0;
         if (self.freeList.items.len > 0) {
@@ -82,7 +72,6 @@ pub const Registry = struct {
         const generation = self.generations.items[entityIndex];
         return Entity.make(entityIndex, generation);
     }
-    /// Alias matching the new ECS API.
     pub fn create(self: *Registry) !Entity {
         return self.createEntity();
     }
@@ -92,9 +81,9 @@ pub const Registry = struct {
         if (index >= self.generations.items.len) {
             return error.InvalidEntityIndex;
         }
-        if (self.destroy_fn) |func| func(self.destroy_ctx.?, entity);
+        self.events.emit(.{ .entity_destroyed = entity });
         if (self.generations.items[index] == std.math.maxInt(u32)) {
-            self.generations.items[index] += 1; // wraps to 0, retiring the index
+            self.generations.items[index] += 1;
             self.component_masks.items[index] = 0;
         } else {
             self.generations.items[index] += 1;
@@ -121,52 +110,28 @@ pub const Registry = struct {
     pub fn attach(self: *Registry, entity: Entity, component: anytype) !void {
         if (!self.isAlive(entity)) return error.EntityIsDead;
         const T = @TypeOf(component);
-        const idx = comptime indexOfType(T);
+        const idx = comptime entity_mod.ComponentIndex(T);
         try self.storage[idx].attachComponent(self.registry_allocator, entity, component);
-        const bit: u64 = @intFromEnum(comptime componentBit(T));
+        const bit: u64 = comptime entity_mod.ComponentBit(T);
         self.component_masks.items[entity.index] |= bit;
     }
-    /// Alias matching the new ECS API.
     pub fn add(self: *Registry, entity: Entity, component: anytype) !void {
         return self.attach(entity, component);
     }
-    /// Upsert a component (attach or overwrite in place).
     pub fn set(self: *Registry, entity: Entity, component: anytype) !void {
         return self.attach(entity, component);
     }
-    /// Remove a component of type T from the entity if present.
     pub fn remove(self: *Registry, comptime T: type, entity: Entity) void {
         if (entity.index >= self.component_masks.items.len) return;
-        const idx = comptime indexOfType(T);
-        // Run the component's deinit if it owns resources.
+        const idx = comptime entity_mod.ComponentIndex(T);
         if (@hasDecl(T, "deinit")) {
             if (self.storage[idx].get(entity)) |component| {
                 component.deinit(self.registry_allocator);
             }
         }
         self.storage[idx].remove(entity) catch {};
-        const bit: u64 = @intFromEnum(comptime componentBit(T));
+        const bit: u64 = comptime entity_mod.ComponentBit(T);
         self.component_masks.items[entity.index] &= ~bit;
-    }
-    fn componentBit(comptime T: type) @import("entity.zig").ComponentBits {
-        if (T == components.MeshComponent) return .Mesh;
-        if (T == components.TransformComponent) return .Transform;
-        if (T == components.WorldTransformComponent) return .WorldTransform;
-        if (T == components.CameraComponent) return .Camera;
-        if (T == components.TextureComponent) return .Texture;
-        if (T == components.SceneComponent) return .Scene;
-        if (T == components.SceneActiveTag) return .SceneActive;
-        if (T == components.ScenePendingTag) return .ScenePending;
-        if (T == components.SceneOwnedComponent) return .SceneOwned;
-        if (T == components.CameraMatricesComponent) return .CameraMatrices;
-        if (T == components.TextureDataComponent) return .TextureData;
-        @compileError("Unknown component type");
-    }
-    fn indexOfType(comptime T: type) comptime_int {
-        inline for (components.AllComponents, 0..) |C, i| {
-            if (C == T) return i;
-        }
-        @compileError("Unregistered component type");
     }
     pub fn QueryIterator(comptime Types: anytype) type {
         return struct {
@@ -177,13 +142,13 @@ pub const Registry = struct {
             pub fn init(registry: *Registry) @This() {
                 var mask: u64 = 0;
                 inline for (Types) |T| {
-                    mask |= @intFromEnum(comptime componentBit(T));
+                    mask |= comptime entity_mod.ComponentBit(T);
                 }
                 return .{ .registry = registry, .mask = mask };
             }
 
             pub fn next(self: *@This()) ?Entity {
-                const primary = &self.registry.storage[indexOfType(Types[0])];
+                const primary = &self.registry.storage[entity_mod.ComponentIndex(Types[0])];
                 while (self.current < primary.dense.items.len) {
                     const entity_id = primary.entities.items[self.current];
                     self.current += 1;
@@ -201,9 +166,8 @@ pub const Registry = struct {
     pub fn Query(self: *Registry, comptime Types: anytype) QueryIterator(Types) {
         return QueryIterator(Types).init(self);
     }
-    /// Fetch a mutable pointer to the entity's component of type T, or null.
     pub fn get(self: *Registry, comptime T: type, entity: Entity) ?*T {
-        return self.storage[indexOfType(T)].getByIndex(entity.index);
+        return self.storage[entity_mod.ComponentIndex(T)].getByIndex(entity.index);
     }
 };
 
