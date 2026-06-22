@@ -14,6 +14,7 @@ pub const Entity = struct {
 pub const ComponentBits = enum(u64) {
     Mesh = 0,
     Transform = 1,
-    Camera = 2,
-    Texture = 3,
+    WorldTransform = 2,
+    Camera = 3,
+    Texture = 4,
 };

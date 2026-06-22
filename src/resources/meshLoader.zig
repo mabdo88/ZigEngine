@@ -12,6 +12,52 @@ pub const MeshData = struct {
     indices: []u32,
 };
 
+/// Adapter for cgltf_node that provides typed access to transform fields.
+/// Avoids using `anytype` against C pointer fields (Bug #6).
+pub const NodeView = struct {
+    node: *gltf.cgltf_node,
+
+    /// Returns the local-space transform as a 4x4 column-major matrix.
+    pub fn localTransform(self: NodeView) [4][4]f32 {
+        const node = self.node;
+        if (node.has_matrix != 0) {
+            var m: [4][4]f32 = undefined;
+            @memcpy(@as([*]f32, @ptrCast(&m)), node.matrix[0..16]);
+            return m;
+        }
+        const tx = if (node.has_translation != 0) node.translation else [3]f32{ 0, 0, 0 };
+        const rq = if (node.has_rotation != 0) node.rotation else [4]f32{ 0, 0, 0, 1 };
+        const sc = if (node.has_scale != 0) node.scale else [3]f32{ 1, 1, 1 };
+
+        // Quaternion to rotation matrix
+        const x = rq[0]; const y = rq[1]; const z = rq[2]; const w = rq[3];
+        const rot: [4][4]f32 = .{
+            .{ 1 - 2*(y*y + z*z),   2*(x*y + w*z),     2*(x*z - w*y), 0 },
+            .{   2*(x*y - w*z), 1 - 2*(x*x + z*z),     2*(y*z + w*x), 0 },
+            .{   2*(x*z + w*y),     2*(y*z - w*x), 1 - 2*(x*x + y*y), 0 },
+            .{               0,                 0,                   0, 1 },
+        };
+
+        // Scale then rotate then translate (TRS)
+        var m = rot;
+        for (0..3) |c| {
+            m[c][0] *= sc[0];
+            m[c][1] *= sc[1];
+            m[c][2] *= sc[2];
+        }
+        m[3][0] = tx[0];
+        m[3][1] = tx[1];
+        m[3][2] = tx[2];
+        return m;
+    }
+
+    /// Returns the parent node as a NodeView, or null if no parent.
+    pub fn parent(self: NodeView) ?NodeView {
+        if (self.node.parent == null) return null;
+        return NodeView{ .node = @ptrCast(self.node.parent) };
+    }
+};
+
 /// Raw CPU-side material data (base color texture). Owned by GltfScene.
 /// Free pixels with the allocator passed to loadgltf after GPU upload.
 pub const MaterialData = struct {
@@ -200,7 +246,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
         const node_raw = &data.*.nodes[ni];
         if (node_raw.mesh == null) continue;
         const cgltf_mesh = node_raw.mesh;
-        const node_transform = nodeWorldTransform(node_raw);
+        const node_transform = nodeWorldTransform(@ptrCast(node_raw));
 
         for (0..cgltf_mesh.*.primitives_count) |pi| {
             const key: usize = @intFromPtr(&cgltf_mesh.*.primitives[pi]);
@@ -261,47 +307,14 @@ fn matMul(a: [4][4]f32, b: [4][4]f32) [4][4]f32 {
     return r;
 }
 
-/// Extracts the local transform of a node as a 4x4 column-major matrix.
-fn nodeLocalTransform(node: anytype) [4][4]f32 {
-    if (node.has_matrix != 0) {
-        var m: [4][4]f32 = undefined;
-        @memcpy(@as([*]f32, @ptrCast(&m)), node.matrix[0..16]);
-        return m;
-    }
-    const tx = if (node.has_translation != 0) node.translation else [3]f32{ 0, 0, 0 };
-    const rq = if (node.has_rotation != 0) node.rotation else [4]f32{ 0, 0, 0, 1 };
-    const sc = if (node.has_scale != 0) node.scale else [3]f32{ 1, 1, 1 };
-
-    // Quaternion to rotation matrix
-    const x = rq[0]; const y = rq[1]; const z = rq[2]; const w = rq[3];
-    const rot: [4][4]f32 = .{
-        .{ 1 - 2*(y*y + z*z),   2*(x*y + w*z),     2*(x*z - w*y), 0 },
-        .{   2*(x*y - w*z), 1 - 2*(x*x + z*z),     2*(y*z + w*x), 0 },
-        .{   2*(x*z + w*y),     2*(y*z - w*x), 1 - 2*(x*x + y*y), 0 },
-        .{               0,                 0,                   0, 1 },
-    };
-
-    // Scale then rotate then translate (TRS)
-    var m = rot;
-    for (0..3) |c| {
-        m[c][0] *= sc[0];
-        m[c][1] *= sc[1];
-        m[c][2] *= sc[2];
-    }
-    m[3][0] = tx[0];
-    m[3][1] = tx[1];
-    m[3][2] = tx[2];
-    return m;
-}
-
 /// Walks the parent chain to compute the world-space transform for a node.
-/// Accepts an allowzero pointer from cgltf's C arrays.
-fn nodeWorldTransform(node: anytype) [4][4]f32 {
-    var local = nodeLocalTransform(node);
-    var parent: ?*gltf.cgltf_node = if (node.parent != null) @ptrCast(node.parent) else null;
-    while (parent) |p| {
-        local = matMul(nodeLocalTransform(p), local);
-        parent = if (p.parent != null) @ptrCast(p.parent) else null;
+fn nodeWorldTransform(node: *gltf.cgltf_node) [4][4]f32 {
+    var view = NodeView{ .node = node };
+    var local = view.localTransform();
+    var p = view.parent();
+    while (p) |pv| {
+        local = matMul(pv.localTransform(), local);
+        p = pv.parent();
     }
     return local;
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-pub const AllComponents = .{ MeshComponent, TransformComponent, CameraComponent, TextureComponent };
+pub const AllComponents = .{ MeshComponent, TransformComponent, WorldTransformComponent, CameraComponent, TextureComponent };
 pub const MeshComponent = struct {
     /// Vertices slice - caller owns this memory and must free it with the same allocator
     /// used to allocate it. If this component is attached to an entity and the entity is
@@ -36,6 +36,11 @@ pub const TransformComponent = struct {
     position: @Vector(3, f32),
     rotation: @Vector(3, f32), // Euler angles (pitch, yaw, roll) in degrees
     scale: @Vector(3, f32),
+};
+/// Stores the world-space transform as a full 4x4 column-major matrix.
+/// Entities with this component skip Euler-based transformToMatrix reconstruction.
+pub const WorldTransformComponent = struct {
+    matrix: [4][4]f32,
 };
 pub const CameraComponent = struct {
     position: @Vector(3, f32) = .{ 0.0, 0.0, 5.0 },

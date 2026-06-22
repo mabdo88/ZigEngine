@@ -121,6 +121,7 @@ pub const Registry = struct {
     fn componentBit(comptime T: type) @import("entity.zig").ComponentBits {
         if (T == components.MeshComponent) return .Mesh;
         if (T == components.TransformComponent) return .Transform;
+        if (T == components.WorldTransformComponent) return .WorldTransform;
         if (T == components.CameraComponent) return .Camera;
         if (T == components.TextureComponent) return .Texture;
         @compileError("Unknown component type");

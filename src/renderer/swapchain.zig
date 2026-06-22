@@ -6,12 +6,12 @@ fn check(result: zvkw.zvk.VkResult) !void {
 }
 
 pub fn createSwapchain() !void {
-    const surfaceFormat = pickSurfaceFormat();
+    const surfaceFormat = try pickSurfaceFormat();
     zvkw.ctx.colorFormat = surfaceFormat.format;
     zvkw.ctx.colorSpace = surfaceFormat.colorSpace;
 
     var surfaceCaps: zvkw.zvk.VkSurfaceCapabilitiesKHR = undefined;
-    _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &surfaceCaps);
+    try check(zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &surfaceCaps));
 
     const swapchainExtent: zvkw.zvk.VkExtent2D = if (surfaceCaps.currentExtent.width == 0xFFFFFFFF)
         .{ .width = zvkw.ctx.m_window.width, .height = zvkw.ctx.m_window.height }
@@ -44,9 +44,9 @@ pub fn createSwapchain() !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateSwapchainFailed;
 
     var imageCount: u32 = 0;
-    _ = zvkw.zvk.vkGetSwapchainImagesKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, &imageCount, null);
+    try check(zvkw.zvk.vkGetSwapchainImagesKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, &imageCount, null));
     zvkw.ctx.swapChainImages = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkImage, imageCount);
-    _ = zvkw.zvk.vkGetSwapchainImagesKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, &imageCount, zvkw.ctx.swapChainImages.ptr);
+    try check(zvkw.zvk.vkGetSwapchainImagesKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, &imageCount, zvkw.ctx.swapChainImages.ptr));
 
     zvkw.ctx.swapChainImageViews = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkImageView, imageCount);
     for (zvkw.ctx.swapChainImages, 0..) |image, i| {
@@ -79,7 +79,7 @@ pub fn createSwapchain() !void {
 /// surface is out of date (resize, minimize/restore, display change).
 pub fn recreateSwapchain() !void {
     var surfaceCaps: zvkw.zvk.VkSurfaceCapabilitiesKHR = undefined;
-    _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &surfaceCaps);
+    try check(zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &surfaceCaps));
     if (surfaceCaps.currentExtent.width == 0 or surfaceCaps.currentExtent.height == 0) return;
 
     try check(zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device));
@@ -116,12 +116,12 @@ pub fn recreateSwapchain() !void {
     }
 }
 
-fn pickSurfaceFormat() zvkw.zvk.VkSurfaceFormatKHR {
+fn pickSurfaceFormat() !zvkw.zvk.VkSurfaceFormatKHR {
     var formatCount: u32 = 0;
-    _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceFormatsKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &formatCount, null);
-    const formats = zvkw.ctx.zallocator.alloc(zvkw.zvk.VkSurfaceFormatKHR, formatCount) catch unreachable;
+    try check(zvkw.zvk.vkGetPhysicalDeviceSurfaceFormatsKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &formatCount, null));
+    const formats = try zvkw.ctx.zallocator.alloc(zvkw.zvk.VkSurfaceFormatKHR, formatCount);
     defer zvkw.ctx.zallocator.free(formats);
-    _ = zvkw.zvk.vkGetPhysicalDeviceSurfaceFormatsKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &formatCount, formats.ptr);
+    try check(zvkw.zvk.vkGetPhysicalDeviceSurfaceFormatsKHR(zvkw.ctx.m_physicalDevice, zvkw.ctx.m_surface, &formatCount, formats.ptr));
 
     for (formats) |format| {
         if (format.format == zvkw.zvk.VK_FORMAT_R8G8B8A8_SRGB and

@@ -15,7 +15,7 @@ fn check(result: zvkw.zvk.VkResult) !void {
 
 pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry, render_system: *rs) !void {
     zvkw.ctx.zallocator = zig_allocator;
-    render_system.* = rs.init();
+    render_system.* = rs.init(zig_allocator);
     const windowCI = zvkw.zvk.VkWindowCreateInfo{
         .title = title.?,
         .width = WWidth,

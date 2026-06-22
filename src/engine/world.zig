@@ -104,7 +104,7 @@ pub const World = struct {
         }
 
         // Upload all unique meshes
-        const gpu_meshes = try allocator.alloc(rs.GpuMesh, scene.meshes.len);
+        const gpu_meshes = try allocator.alloc(*rs.GpuMesh, scene.meshes.len);
         defer allocator.free(gpu_meshes);
         for (scene.meshes, 0..) |mesh, mi| {
             const mesh_comp = component.MeshComponent{
@@ -112,7 +112,8 @@ pub const World = struct {
                 .indices = mesh.indices,
                 .owns_memory = false,
             };
-            try rs.recordMeshUpload(&batch, &mesh_comp, &gpu_meshes[mi]);
+            gpu_meshes[mi] = try allocator.create(rs.GpuMesh);
+            try rs.recordMeshUpload(&batch, &mesh_comp, gpu_meshes[mi]);
         }
 
         try batch.submit();
@@ -132,15 +133,11 @@ pub const World = struct {
             try self.registry.attach(entity, component.TextureComponent{
                 .textureIndex = tex_handles[prim.material_idx],
             });
-            // Store node transform directly into the gpu_meshes map so the
-            // render system can draw with the correct world matrix
-            try self.render_system.gpu_meshes.put(entity, gpu_meshes[prim.mesh_idx]);
-            // Attach transform from scene graph
-            const t = prim.transform;
-            try self.registry.attach(entity, component.TransformComponent{
-                .position = .{ t[3][0], t[3][1], t[3][2] },
-                .rotation = .{ 0, 0, 0 },
-                .scale = .{ 1, 1, 1 },
+            // Attach the shared GPU mesh to this entity.
+            try self.render_system.attachMesh(entity, gpu_meshes[prim.mesh_idx]);
+            // Attach full world transform from the scene graph.
+            try self.registry.attach(entity, component.WorldTransformComponent{
+                .matrix = prim.transform,
             });
             entities[i] = entity;
         }
