@@ -36,14 +36,23 @@ Engine                      owns the allocator + World, runs the main loop
 
 Components (`src/components/components.zig`):
 
-| Component            | Purpose                                  |
-| -------------------- | ---------------------------------------- |
-| `MeshComponent`      | CPU-side vertices + indices              |
-| `TransformComponent` | position / rotation (Euler) / scale      |
-| `CameraComponent`    | eye, target, up, fov, near/far planes    |
-| `TextureComponent`   | index into the bindless texture heap     |
+| Component               | Purpose                                  |
+| ----------------------- | ---------------------------------------- |
+| `MeshComponent`         | CPU-side vertices + indices              |
+| `TransformComponent`    | position / rotation (Euler) / scale      |
+| `WorldTransformComponent` | full 4x4 transform matrix from glTF   |
+| `CameraComponent`       | eye, target, up, fov, near/far planes    |
+| `TextureComponent`      | index into the bindless texture heap     |
 
 The Vulkan backend lives under `src/renderer/`: `zVulkanContext.zig` holds device/swapchain/pipeline state and `zvulkanSystem.zig` drives initialization, the per-frame render loop, and texture/buffer uploads.
+
+## Recent Improvements
+
+- **Transform system overhaul**: Added `WorldTransformComponent` to preserve full glTF transforms (including scale and rotation) while allowing local overrides via `TransformComponent`. The renderer now combines both matrices (world × local) for the final model matrix.
+- **GPU mesh refcounting**: Implemented `RenderSystem.attachMesh` API with reference-counted `GpuMesh` pointers to prevent double-free issues when multiple entities share the same mesh.
+- **Vulkan error handling**: Added `VkResult` error checking to previously ignored Vulkan calls (`vkGetPhysicalDeviceSurfaceCapabilitiesKHR`, `vkGetSwapchainImagesKHR`, `vkGetPhysicalDeviceSurfaceFormatsKHR`).
+- **Type-safe glTF node access**: Created `NodeView` adapter struct to replace `anytype`-based C pointer access in the glTF loader, improving type safety and maintainability.
+- **Scene swapping**: Added ability to easily swap between duck and house scenes in `duck_demo.zig` via commented/uncommented loadScene calls.
 
 ## Project layout
 
