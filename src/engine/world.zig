@@ -74,6 +74,7 @@ pub const VulkanWorld = struct {
                 .camera_position = sc.camera_position,
                 .camera_target = sc.camera_target,
                 .offset = sc.offset,
+                .rotates = sc.rotates,
             });
         }
     }

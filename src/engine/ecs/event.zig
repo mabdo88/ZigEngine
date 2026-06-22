@@ -46,3 +46,82 @@ pub const EventBus = struct {
         }
     }
 };
+
+test "subscribe and emit receives event" {
+    var bus = EventBus.init(std.testing.allocator);
+    defer bus.deinit();
+
+    const Counter = struct {
+        count: *u32,
+        fn cb(ctx: *anyopaque, _: EventPayload) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.count.* += 1;
+        }
+    };
+    var count: u32 = 0;
+    var counter = Counter{ .count = &count };
+    try bus.subscribe(.entity_destroyed, &counter, Counter.cb);
+
+    bus.emit(.{ .entity_destroyed = Entity.make(0, 0) });
+    try std.testing.expectEqual(@as(u32, 1), count);
+}
+
+test "multiple handlers for same event type all fire" {
+    var bus = EventBus.init(std.testing.allocator);
+    defer bus.deinit();
+
+    const Counter = struct {
+        count: *u32,
+        fn cb(ctx: *anyopaque, _: EventPayload) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.count.* += 1;
+        }
+    };
+
+    var c1: u32 = 0;
+    var c2: u32 = 0;
+    var counter1 = Counter{ .count = &c1 };
+    var counter2 = Counter{ .count = &c2 };
+    try bus.subscribe(.scene_unloaded, &counter1, Counter.cb);
+    try bus.subscribe(.scene_unloaded, &counter2, Counter.cb);
+
+    bus.emit(.{ .scene_unloaded = {} });
+    try std.testing.expectEqual(@as(u32, 1), c1);
+    try std.testing.expectEqual(@as(u32, 1), c2);
+}
+
+test "handler only receives matching event type" {
+    var bus = EventBus.init(std.testing.allocator);
+    defer bus.deinit();
+
+    const Counter = struct {
+        count: *u32,
+        fn cb(ctx: *anyopaque, _: EventPayload) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.count.* += 1;
+        }
+    };
+
+    var destroyed_count: u32 = 0;
+    var unloaded_count: u32 = 0;
+    var dc = Counter{ .count = &destroyed_count };
+    var uc = Counter{ .count = &unloaded_count };
+    try bus.subscribe(.entity_destroyed, &dc, Counter.cb);
+    try bus.subscribe(.scene_unloaded, &uc, Counter.cb);
+
+    bus.emit(.{ .entity_destroyed = Entity.make(0, 0) });
+    try std.testing.expectEqual(@as(u32, 1), destroyed_count);
+    try std.testing.expectEqual(@as(u32, 0), unloaded_count);
+
+    bus.emit(.{ .scene_unloaded = {} });
+    try std.testing.expectEqual(@as(u32, 1), destroyed_count);
+    try std.testing.expectEqual(@as(u32, 1), unloaded_count);
+}
+
+test "emit with no handlers is safe" {
+    var bus = EventBus.init(std.testing.allocator);
+    defer bus.deinit();
+
+    bus.emit(.{ .entity_destroyed = Entity.make(0, 0) });
+    bus.emit(.{ .scene_unloaded = {} });
+}

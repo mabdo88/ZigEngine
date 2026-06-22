@@ -49,3 +49,108 @@ pub const SystemRunner = struct {
         }
     }
 };
+
+fn noopUpdate(_: *Registry, _: *anyopaque, _: f32) anyerror!void {}
+fn noopInit(_: *Registry, _: *anyopaque) anyerror!void {}
+fn noopDeinit(_: *Registry, _: *anyopaque) void {}
+
+const OrderTracker = struct {
+    order: *std.ArrayList(u8),
+    id: u8 = 0,
+    fn update(_: *Registry, ctx: *anyopaque, _: f32) anyerror!void {
+        const self: *OrderTracker = @ptrCast(@alignCast(ctx));
+        try self.order.append(std.testing.allocator, self.id);
+    }
+};
+
+test "addSystem sorts by priority ascending" {
+    var runner = SystemRunner.init(std.testing.allocator);
+    defer runner.deinit();
+
+    var ctx: u8 = 0;
+    try runner.addSystem(.{ .name = "low", .priority = 10, .update_fn = noopUpdate, .context = &ctx });
+    try runner.addSystem(.{ .name = "high", .priority = -5, .update_fn = noopUpdate, .context = &ctx });
+    try runner.addSystem(.{ .name = "mid", .priority = 0, .update_fn = noopUpdate, .context = &ctx });
+
+    try std.testing.expectEqualStrings("high", runner.systems.items[0].name);
+    try std.testing.expectEqualStrings("mid", runner.systems.items[1].name);
+    try std.testing.expectEqualStrings("low", runner.systems.items[2].name);
+}
+
+test "update calls systems in priority order" {
+    var runner = SystemRunner.init(std.testing.allocator);
+    defer runner.deinit();
+
+    var order: std.ArrayList(u8) = .empty;
+    defer order.deinit(std.testing.allocator);
+
+    var t1 = OrderTracker{ .order = &order, .id = 1 };
+    var t2 = OrderTracker{ .order = &order, .id = 2 };
+    var t3 = OrderTracker{ .order = &order, .id = 3 };
+
+    try runner.addSystem(.{ .name = "c", .priority = 10, .update_fn = OrderTracker.update, .context = &t1 });
+    try runner.addSystem(.{ .name = "a", .priority = -5, .update_fn = OrderTracker.update, .context = &t2 });
+    try runner.addSystem(.{ .name = "b", .priority = 0, .update_fn = OrderTracker.update, .context = &t3 });
+
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    try runner.update(&reg, 0.0);
+
+    try std.testing.expectEqual(@as(usize, 3), order.items.len);
+    try std.testing.expectEqual(@as(u8, 2), order.items[0]); // a (priority -5)
+    try std.testing.expectEqual(@as(u8, 3), order.items[1]); // b (priority 0)
+    try std.testing.expectEqual(@as(u8, 1), order.items[2]); // c (priority 10)
+}
+
+test "initAll calls init_fn for systems that have it" {
+    var runner = SystemRunner.init(std.testing.allocator);
+    defer runner.deinit();
+
+    const InitTracker = struct {
+        called: *bool,
+        fn init(_: *Registry, ctx: *anyopaque) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.called.* = true;
+        }
+    };
+
+    var called = false;
+    var tracker = InitTracker{ .called = &called };
+    var ctx: u8 = 0;
+
+    try runner.addSystem(.{ .name = "with_init", .priority = 0, .update_fn = noopUpdate, .init_fn = InitTracker.init, .context = &tracker });
+    try runner.addSystem(.{ .name = "without_init", .priority = 0, .update_fn = noopUpdate, .context = &ctx });
+
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    try runner.initAll(&reg);
+    try std.testing.expect(called);
+}
+
+test "deinitAll calls deinit_fn for systems that have it" {
+    var runner = SystemRunner.init(std.testing.allocator);
+    defer runner.deinit();
+
+    const DeinitTracker = struct {
+        called: *bool,
+        fn deinit(_: *Registry, ctx: *anyopaque) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.called.* = true;
+        }
+    };
+
+    var called = false;
+    var tracker = DeinitTracker{ .called = &called };
+    var ctx: u8 = 0;
+
+    try runner.addSystem(.{ .name = "with_deinit", .priority = 0, .update_fn = noopUpdate, .deinit_fn = DeinitTracker.deinit, .context = &tracker });
+    try runner.addSystem(.{ .name = "without_deinit", .priority = 0, .update_fn = noopUpdate, .context = &ctx });
+
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    runner.deinitAll(&reg);
+    try std.testing.expect(called);
+}

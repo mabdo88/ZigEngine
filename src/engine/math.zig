@@ -161,3 +161,94 @@ test "perspective matches the analytic projection terms" {
     try std.testing.expectApproxEqAbs(-(far * near) / (far - near), m[3][2], tol);
     try std.testing.expectApproxEqAbs(aspect, m[1][1] / m[0][0] * -1.0, tol);
 }
+
+test "matMul: identity times any matrix equals that matrix" {
+    const a = identityMatrix();
+    const b: [4][4]f32 = .{
+        .{ 1, 2, 3, 4 },
+        .{ 5, 6, 7, 8 },
+        .{ 9, 10, 11, 12 },
+        .{ 13, 14, 15, 16 },
+    };
+    const r = matMul(a, b);
+    const tol = 1e-5;
+    for (0..4) |row| {
+        for (0..4) |col| {
+            try std.testing.expectApproxEqAbs(b[col][row], r[col][row], tol);
+        }
+    }
+}
+
+test "matMul: two matrices compose correctly" {
+    const a: [4][4]f32 = .{
+        .{ 2, 0, 0, 0 },
+        .{ 0, 2, 0, 0 },
+        .{ 0, 0, 2, 0 },
+        .{ 0, 0, 0, 1 },
+    };
+    const b: [4][4]f32 = .{
+        .{ 1, 0, 0, 0 },
+        .{ 0, 1, 0, 0 },
+        .{ 0, 0, 1, 0 },
+        .{ 5, 6, 7, 1 },
+    };
+    const r = matMul(a, b);
+    const tol = 1e-5;
+    // Scale * translate → scaled translation
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), r[0][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), r[1][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), r[2][2], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0), r[3][0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 12.0), r[3][1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 14.0), r[3][2], tol);
+}
+
+test "normalize: unit vector stays unit" {
+    const v: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const n = normalize(v);
+    const tol = 1e-5;
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), n[0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[2], tol);
+}
+
+test "normalize: non-unit vector becomes unit" {
+    const v: @Vector(3, f32) = .{ 3.0, 4.0, 0.0 };
+    const n = normalize(v);
+    const tol = 1e-5;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.6), n[0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8), n[1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), n[2], tol);
+}
+
+test "cross: X cross Y equals Z" {
+    const x: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const y: @Vector(3, f32) = .{ 0.0, 1.0, 0.0 };
+    const z = cross(x, y);
+    const tol = 1e-5;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), z[0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), z[1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), z[2], tol);
+}
+
+test "cross: Y cross X equals -Z" {
+    const x: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const y: @Vector(3, f32) = .{ 0.0, 1.0, 0.0 };
+    const z = cross(y, x);
+    const tol = 1e-5;
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), z[0], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), z[1], tol);
+    try std.testing.expectApproxEqAbs(@as(f32, -1.0), z[2], tol);
+}
+
+test "dot: orthogonal vectors give zero" {
+    const a: @Vector(3, f32) = .{ 1.0, 0.0, 0.0 };
+    const b: @Vector(3, f32) = .{ 0.0, 1.0, 0.0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), dot(a, b), 1e-5);
+}
+
+test "dot: parallel vectors give product of magnitudes" {
+    const a: @Vector(3, f32) = .{ 2.0, 0.0, 0.0 };
+    const b: @Vector(3, f32) = .{ 3.0, 0.0, 0.0 };
+    try std.testing.expectApproxEqAbs(@as(f32, 6.0), dot(a, b), 1e-5);
+}

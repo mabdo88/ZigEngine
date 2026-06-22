@@ -1,6 +1,20 @@
 const std = @import("std");
 const Entity = @import("../entity/entity.zig").Entity;
 
+pub fn ComponentBit(comptime T: type) u64 {
+    inline for (AllComponents, 0..) |C, i| {
+        if (C == T) return @as(u64, 1) << @intCast(i);
+    }
+    @compileError("Unregistered component type: " ++ @typeName(T));
+}
+
+pub fn ComponentIndex(comptime T: type) comptime_int {
+    inline for (AllComponents, 0..) |C, i| {
+        if (C == T) return i;
+    }
+    @compileError("Unregistered component type: " ++ @typeName(T));
+}
+
 pub const AllComponents = .{
     MeshComponent,
     TransformComponent,
@@ -65,6 +79,7 @@ pub const SceneComponent = struct {
     camera_position: @Vector(3, f32) = .{ 0.0, 0.5, 3.0 },
     camera_target: @Vector(3, f32) = .{ 0.0, 0.5, 0.0 },
     offset: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 },
+    rotates: bool = false,
 };
 
 pub const SceneActiveTag = struct {};

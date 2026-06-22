@@ -1,5 +1,3 @@
-const components = @import("ecs/components/components.zig");
-
 pub const Config = struct {
     window_title: [:0]const u8 = "ZVulkan Window",
     window_width: u16 = 800,
@@ -24,6 +22,7 @@ pub const Config = struct {
         camera_position: @Vector(3, f32),
         camera_target: @Vector(3, f32),
         offset: @Vector(3, f32),
+        rotates: bool = false,
     };
 };
 
@@ -34,6 +33,7 @@ pub const default_scenes = [_]Config.SceneConfig{
         .camera_position = .{ 0.0, 0.5, 3.0 },
         .camera_target = .{ 0.0, 0.5, 0.0 },
         .offset = .{ 0.0, -25.0, -100.0 },
+        .rotates = true,
     },
     .{
         .name = "House",

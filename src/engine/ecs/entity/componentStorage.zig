@@ -60,3 +60,83 @@ pub fn ComponentStorage(comptime T: type) type {
         }
     };
 }
+
+test "attach and get component" {
+    const TestComp = struct { value: u32 };
+    var storage = ComponentStorage(TestComp){};
+    defer storage.deinit(std.testing.allocator);
+
+    const entity = e.make(0, 0);
+    try storage.attachComponent(std.testing.allocator, entity, .{ .value = 42 });
+
+    const comp = storage.get(entity).?;
+    try std.testing.expectEqual(@as(u32, 42), comp.value);
+}
+
+test "remove component" {
+    const TestComp = struct { value: u32 };
+    var storage = ComponentStorage(TestComp){};
+    defer storage.deinit(std.testing.allocator);
+
+    const entity = e.make(0, 0);
+    try storage.attachComponent(std.testing.allocator, entity, .{ .value = 42 });
+    try storage.remove(entity);
+
+    try std.testing.expect(storage.get(entity) == null);
+    try std.testing.expect(!storage.has(entity));
+}
+
+test "has component check" {
+    const TestComp = struct { value: u32 };
+    var storage = ComponentStorage(TestComp){};
+    defer storage.deinit(std.testing.allocator);
+
+    const entity = e.make(0, 0);
+    try std.testing.expect(!storage.has(entity));
+    try storage.attachComponent(std.testing.allocator, entity, .{ .value = 1 });
+    try std.testing.expect(storage.has(entity));
+}
+
+test "attach overwrites existing component" {
+    const TestComp = struct { value: u32 };
+    var storage = ComponentStorage(TestComp){};
+    defer storage.deinit(std.testing.allocator);
+
+    const entity = e.make(0, 0);
+    try storage.attachComponent(std.testing.allocator, entity, .{ .value = 10 });
+    try storage.attachComponent(std.testing.allocator, entity, .{ .value = 99 });
+
+    const comp = storage.get(entity).?;
+    try std.testing.expectEqual(@as(u32, 99), comp.value);
+    try std.testing.expectEqual(@as(usize, 1), storage.dense.items.len);
+}
+
+test "get returns null for non-existent entity" {
+    const TestComp = struct { value: u32 };
+    var storage = ComponentStorage(TestComp){};
+    defer storage.deinit(std.testing.allocator);
+
+    const entity = e.make(0, 0);
+    try std.testing.expect(storage.get(entity) == null);
+
+    try storage.attachComponent(std.testing.allocator, entity, .{ .value = 1 });
+    const other = e.make(1, 0);
+    try std.testing.expect(storage.get(other) == null);
+}
+
+test "remove preserves other entities via swap" {
+    const TestComp = struct { value: u32 };
+    var storage = ComponentStorage(TestComp){};
+    defer storage.deinit(std.testing.allocator);
+
+    const e0 = e.make(0, 0);
+    const e1 = e.make(1, 0);
+    try storage.attachComponent(std.testing.allocator, e0, .{ .value = 100 });
+    try storage.attachComponent(std.testing.allocator, e1, .{ .value = 200 });
+
+    try storage.remove(e0);
+
+    try std.testing.expect(storage.get(e0) == null);
+    const comp = storage.get(e1).?;
+    try std.testing.expectEqual(@as(u32, 200), comp.value);
+}

@@ -2,7 +2,6 @@ const std = @import("std");
 const Entity = @import("entity.zig").Entity;
 const compstrg = @import("componentStorage.zig");
 const components = @import("../components/components.zig");
-const entity_mod = @import("entity.zig");
 const event = @import("../event.zig");
 
 fn StorageType() type {
@@ -110,9 +109,9 @@ pub const Registry = struct {
     pub fn attach(self: *Registry, entity: Entity, component: anytype) !void {
         if (!self.isAlive(entity)) return error.EntityIsDead;
         const T = @TypeOf(component);
-        const idx = comptime entity_mod.ComponentIndex(T);
+        const idx = comptime components.ComponentIndex(T);
         try self.storage[idx].attachComponent(self.registry_allocator, entity, component);
-        const bit: u64 = comptime entity_mod.ComponentBit(T);
+        const bit: u64 = comptime components.ComponentBit(T);
         self.component_masks.items[entity.index] |= bit;
     }
     pub fn add(self: *Registry, entity: Entity, component: anytype) !void {
@@ -123,14 +122,14 @@ pub const Registry = struct {
     }
     pub fn remove(self: *Registry, comptime T: type, entity: Entity) void {
         if (entity.index >= self.component_masks.items.len) return;
-        const idx = comptime entity_mod.ComponentIndex(T);
+        const idx = comptime components.ComponentIndex(T);
         if (@hasDecl(T, "deinit")) {
             if (self.storage[idx].get(entity)) |component| {
                 component.deinit(self.registry_allocator);
             }
         }
         self.storage[idx].remove(entity) catch {};
-        const bit: u64 = comptime entity_mod.ComponentBit(T);
+        const bit: u64 = comptime components.ComponentBit(T);
         self.component_masks.items[entity.index] &= ~bit;
     }
     pub fn QueryIterator(comptime Types: anytype) type {
@@ -142,13 +141,13 @@ pub const Registry = struct {
             pub fn init(registry: *Registry) @This() {
                 var mask: u64 = 0;
                 inline for (Types) |T| {
-                    mask |= comptime entity_mod.ComponentBit(T);
+                    mask |= comptime components.ComponentBit(T);
                 }
                 return .{ .registry = registry, .mask = mask };
             }
 
             pub fn next(self: *@This()) ?Entity {
-                const primary = &self.registry.storage[entity_mod.ComponentIndex(Types[0])];
+                const primary = &self.registry.storage[components.ComponentIndex(Types[0])];
                 while (self.current < primary.dense.items.len) {
                     const entity_id = primary.entities.items[self.current];
                     self.current += 1;
@@ -167,7 +166,7 @@ pub const Registry = struct {
         return QueryIterator(Types).init(self);
     }
     pub fn get(self: *Registry, comptime T: type, entity: Entity) ?*T {
-        return self.storage[entity_mod.ComponentIndex(T)].getByIndex(entity.index);
+        return self.storage[components.ComponentIndex(T)].getByIndex(entity.index);
     }
 };
 
@@ -282,4 +281,157 @@ test "query entities with mesh and transform" {
         try std.testing.expectEqual(entity1.index, entity.index);
     }
     try std.testing.expectEqual(@as(u32, 1), count);
+}
+
+test "entity recycling increments generation" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const e1 = try reg.create();
+    try reg.destroyEntity(e1);
+    const e2 = try reg.create();
+
+    // Same index, different generation
+    try std.testing.expectEqual(e1.index, e2.index);
+    try std.testing.expect(e1.generation < e2.generation);
+    try std.testing.expect(!reg.isAlive(e1));
+    try std.testing.expect(reg.isAlive(e2));
+}
+
+test "re-add component to recycled entity works" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const e1 = try reg.create();
+    try reg.add(e1, components.TransformComponent{
+        .position = .{ 1.0, 2.0, 3.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    });
+    try reg.destroyEntity(e1);
+
+    const e2 = try reg.create();
+    try std.testing.expectEqual(e1.index, e2.index);
+    try std.testing.expect(reg.get(components.TransformComponent, e2) == null);
+
+    try reg.add(e2, components.TransformComponent{
+        .position = .{ 4.0, 5.0, 6.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    });
+    const transform = reg.get(components.TransformComponent, e2).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 4.0), transform.position[0], 1e-5);
+}
+
+test "query with tag components" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const scene1 = try reg.create();
+    try reg.add(scene1, components.SceneComponent{ .name = "A", .path = "" });
+    try reg.add(scene1, components.SceneActiveTag{});
+
+    const scene2 = try reg.create();
+    try reg.add(scene2, components.SceneComponent{ .name = "B", .path = "" });
+
+    var active_it = reg.Query(.{ components.SceneComponent, components.SceneActiveTag });
+    const active = active_it.next().?;
+    try std.testing.expectEqual(scene1.index, active.index);
+    try std.testing.expect(active_it.next() == null);
+}
+
+test "attach to dead entity fails" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const entity = try reg.create();
+    try reg.destroyEntity(entity);
+
+    const result = reg.add(entity, components.TransformComponent{
+        .position = .{ 0.0, 0.0, 0.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    });
+    try std.testing.expectError(error.EntityIsDead, result);
+}
+
+test "destroy emits entity_destroyed event" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const Counter = struct {
+        count: *u32,
+        fn cb(ctx: *anyopaque, payload: event.EventPayload) void {
+            _ = payload;
+            const self: *@This() = @ptrCast(@alignCast(ctx));
+            self.count.* += 1;
+        }
+    };
+
+    var count: u32 = 0;
+    var counter = Counter{ .count = &count };
+    try reg.events.subscribe(.entity_destroyed, &counter, Counter.cb);
+
+    const entity = try reg.create();
+    try reg.destroyEntity(entity);
+
+    try std.testing.expectEqual(@as(u32, 1), count);
+}
+
+test "overwrite component via set" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const entity = try reg.create();
+    try reg.add(entity, components.TransformComponent{
+        .position = .{ 1.0, 0.0, 0.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    });
+    try reg.set(entity, components.TransformComponent{
+        .position = .{ 9.0, 8.0, 7.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    });
+
+    const transform = reg.get(components.TransformComponent, entity).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 9.0), transform.position[0], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 8.0), transform.position[1], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 7.0), transform.position[2], 1e-5);
+}
+
+test "query returns empty when no entities match" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    var it = reg.Query(.{components.CameraComponent});
+    try std.testing.expect(it.next() == null);
+}
+
+test "multiple entities with same component all found by query" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    var entities: [5]Entity = undefined;
+    for (&entities) |*e| {
+        e.* = try reg.create();
+        try reg.add(e.*, components.TransformComponent{
+            .position = .{ 0.0, 0.0, 0.0 },
+            .rotation = .{ 0.0, 0.0, 0.0 },
+            .scale = .{ 1.0, 1.0, 1.0 },
+        });
+    }
+
+    var it = reg.Query(.{components.TransformComponent});
+    var count: u32 = 0;
+    while (it.next()) |_| count += 1;
+    try std.testing.expectEqual(@as(u32, 5), count);
+}
+
+test "get returns null for unregistered component type on entity" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const entity = try reg.create();
+    try std.testing.expect(reg.get(components.CameraComponent, entity) == null);
 }
