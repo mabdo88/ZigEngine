@@ -1,6 +1,6 @@
 const std = @import("std");
-const registry = @import("../engine/registry.zig");
-const CameraComponent = @import("../components/components.zig").CameraComponent;
+const registry = @import("../engine/ecs/entity/registry.zig");
+const CameraComponent = @import("../engine/ecs/components/components.zig").CameraComponent;
 
 pub const CameraMatrices = struct {
     view: [4][4]f32,
@@ -10,7 +10,7 @@ pub const CameraMatrices = struct {
 pub fn update(reg: *registry.Registry, aspect: f32) ?CameraMatrices {
     var it = reg.Query(.{CameraComponent});
     while (it.next()) |entity| {
-        const camera = reg.get(CameraComponent, entity.index).?;
+        const camera = reg.get(CameraComponent, entity).?;
         return CameraMatrices{
             .view = lookAt(camera.position, camera.target, camera.up),
             .projection = perspective(camera.fov, camera.near, camera.far, aspect),

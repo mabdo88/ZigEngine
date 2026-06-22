@@ -290,6 +290,21 @@ pub fn createDefaultTexture() !void {
     _ = try uploadTexture(&white, 1, 1);
 }
 
+/// Destroy all scene-uploaded textures and reset the bindless heap back to just
+/// the default texture (slot 0). Called on scene unload so bindless slots are
+/// reclaimed deterministically before the next scene uploads. Waits for the GPU
+/// to be idle first so no in-flight frame samples a destroyed image.
+pub fn resetTextures() void {
+    _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
+    var i: u32 = 1; // keep slot 0 (default white texture)
+    while (i < zvkw.ctx.textureCount) : (i += 1) {
+        zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.textureSlots[i].view, null);
+        zvkw.vma.vmaDestroyImage(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.textureSlots[i].image), zvkw.ctx.textureSlots[i].allocation);
+        zvkw.ctx.textureSlots[i] = .{};
+    }
+    zvkw.ctx.textureCount = if (zvkw.ctx.textureCount > 0) 1 else 0;
+}
+
 pub fn uploadTextureBatched(batch: *upload.UploadBatch, pixels: []const u8, width: u32, height: u32) !zvkw.TextureHandle {
     const slot = zvkw.ctx.textureCount;
     if (slot >= zvkw.MAX_TEXTURES) return error.TextureHeapFull;

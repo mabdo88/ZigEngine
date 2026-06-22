@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 pub const vma = @import("vmaimport");
 pub const zvk = @import("../platform/zvkgl.zig");
+pub const win = @import("../platform/window.zig");
 
 pub const enable_validation = builtin.mode == .Debug;
 pub const max_frames_in_flight = 2;
@@ -55,7 +56,7 @@ pub const VulkanContext = struct {
     imageIndex: u32 = 0,
     frameIndex: u32 = 0,
     queueFamilyIndex: u32 = 0,
-    m_window: zvk.VkWindow = undefined,
+    m_window: win.Window = undefined,
     m_instance: zvk.VkInstance = null,
     m_Device: zvk.VkDevice = null,
     queue: zvk.VkQueue = null,

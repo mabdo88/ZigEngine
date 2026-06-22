@@ -1,8 +1,8 @@
 const std = @import("std");
 const zvkw = @import("zVulkanContext.zig");
-const components = @import("../components/components.zig");
-const Registry = @import("../engine/registry.zig").Registry;
-const Entity = @import("../engine/entity.zig").Entity;
+const components = @import("../engine/ecs/components/components.zig");
+const Registry = @import("../engine/ecs/entity/registry.zig").Registry;
+const Entity = @import("../engine/ecs/entity/entity.zig").Entity;
 const cs = @import("cameraSystem.zig");
 const upload = @import("upload.zig");
 
@@ -146,12 +146,12 @@ pub const RenderSystem = struct {
         try self.gpu_meshes.put(entity, gpu_mesh);
     }
 
-    pub fn update(self: *RenderSystem, registry: *Registry, cb: zvkw.zvk.VkCommandBuffer) !void {
+    pub fn update(self: *RenderSystem, registry: *Registry, cb: zvkw.zvk.VkCommandBuffer, dt: f32) !void {
         zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipelineLayout, 0, 1, &zvkw.ctx.uboDescriptorSets[zvkw.ctx.frameIndex], 0, null);
         zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipelineLayout, 1, 1, &zvkw.ctx.bindlessDescriptorSet, 0, null);
         var it = registry.Query(.{components.MeshComponent});
         while (it.next()) |entity| {
-            const mesh = registry.get(components.MeshComponent, entity.index).?;
+            const mesh = registry.get(components.MeshComponent, entity).?;
             if (!mesh.isValid()) continue;
             if (!self.gpu_meshes.contains(entity)) {
                 const gpu_mesh = try uploadMesh(self.allocator, mesh);
@@ -159,9 +159,22 @@ pub const RenderSystem = struct {
                 std.log.info("RenderSystem: uploaded mesh for entity {}", .{entity.index});
             }
 
+            if (registry.get(components.TransformComponent, entity)) |transform| {
+                if (registry.get(components.SceneOwnedComponent, entity)) |owned| {
+                    var active_it = registry.Query(.{ components.SceneComponent, components.SceneActiveTag });
+                    if (active_it.next()) |active| {
+                        const scene = registry.get(components.SceneComponent, active).?;
+                        if (std.mem.eql(u8, scene.name, "Duck") and owned.owner.index == active.index) {
+                            transform.rotation[1] += 90.0 * dt;
+                            if (transform.rotation[1] > 360.0) transform.rotation[1] -= 360.0;
+                        }
+                    }
+                }
+            }
+
             const model_matrix = blk: {
-                const world = if (registry.get(components.WorldTransformComponent, entity.index)) |wt| wt.matrix else identityMatrix();
-                const local = if (registry.get(components.TransformComponent, entity.index)) |transform| transformToMatrix(transform) else identityMatrix();
+                const world = if (registry.get(components.WorldTransformComponent, entity)) |wt| wt.matrix else identityMatrix();
+                const local = if (registry.get(components.TransformComponent, entity)) |transform| transformToMatrix(transform) else identityMatrix();
                 break :blk matMul(world, local);
             };
 
@@ -171,7 +184,7 @@ pub const RenderSystem = struct {
             zvkw.zvk.vkCmdBindIndexBuffer(cb, gpu_mesh.indexBuffer, 0, zvkw.zvk.VK_INDEX_TYPE_UINT32);
             const pc = zvkw.PushConstants{
                 .model = model_matrix,
-                .textureIndex = if (registry.get(components.TextureComponent, entity.index)) |tc| tc.textureIndex else 0,
+                .textureIndex = if (registry.get(components.TextureComponent, entity)) |tc| tc.textureIndex else 0,
             };
 
             zvkw.zvk.vkCmdPushConstants(cb, zvkw.ctx.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.PushConstants), @ptrCast(&pc));

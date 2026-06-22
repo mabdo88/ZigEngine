@@ -4,7 +4,7 @@ const stbi = @cImport({
     @cInclude("../../deps/stb/stb_image.h");
 });
 
-const components = @import("../components/components.zig");
+const components = @import("../engine/ecs/components/components.zig");
 
 /// Raw CPU-side mesh data. Owned by GltfScene — do not free individually.
 pub const MeshData = struct {

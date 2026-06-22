@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const rgstry = @import("../engine/registry.zig");
+const rgstry = @import("../engine/ecs/entity/registry.zig");
 const rs = @import("renderSystem.zig").RenderSystem;
 const cs = @import("cameraSystem.zig");
 const zvkw = @import("zVulkanContext.zig");
@@ -16,14 +16,9 @@ fn check(result: zvkw.zvk.VkResult) !void {
 pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry, render_system: *rs) !void {
     zvkw.ctx.zallocator = zig_allocator;
     render_system.* = rs.init(zig_allocator);
-    const windowCI = zvkw.zvk.VkWindowCreateInfo{
-        .title = title.?,
-        .width = WWidth,
-        .height = WHeight,
-        .resizable = true,
-    };
-    try zvkw.zvk.vkCreateWindow(windowCI, &zvkw.ctx.m_window);
-    zvkw.ctx.extensions = try zvkw.zvk.vkGetRequiredInstanceExtensions(zig_allocator);
+    try zvkw.win.init();
+    zvkw.ctx.m_window = try zvkw.win.create(title.?, WWidth, WHeight, true);
+    zvkw.ctx.extensions = try zvkw.win.requiredInstanceExtensions(zig_allocator);
 
     const appCI = zvkw.zvk.VkApplicationInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -35,6 +30,7 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
     };
     const instanceCI = zvkw.zvk.VkInstanceCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .flags = if (builtin.os.tag == .macos) zvkw.zvk.VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR else 0,
         .pApplicationInfo = &appCI,
         .enabledLayerCount = if (zvkw.enable_validation) 1 else 0,
         .ppEnabledLayerNames = if (zvkw.enable_validation) &zvkw.validationLayers else null,
@@ -44,7 +40,7 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
 
     const result = zvkw.zvk.vkCreateInstance(&instanceCI, null, &zvkw.ctx.m_instance);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateInstanceFailed;
-    zvkw.ctx.m_surface = try zvkw.zvk.vkCreateWindowSurface(&zvkw.ctx.m_window, zvkw.ctx.m_instance);
+    zvkw.ctx.m_surface = try zvkw.ctx.m_window.createSurface(zvkw.ctx.m_instance);
     device.setupDebugMessenger();
     try device.pickPhysicalDevice();
     try device.createLogicalDevice();
@@ -118,16 +114,20 @@ pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
         }
     }
     zvkw.zvk.vkDestroyInstance(zvkw.ctx.m_instance, null);
-    zvkw.zvk.vkDestroyWindow(&zvkw.ctx.m_window);
+    zvkw.ctx.m_window.destroy();
+    zvkw.win.terminate();
 }
 
-pub fn render(matrices: cs.CameraMatrices, reg: *rgstry.Registry, render_system: *rs) !void {
+pub fn render(matrices: cs.CameraMatrices, reg: *rgstry.Registry, render_system: *rs, dt: f32) !void {
     try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
 
     // Window-driven resize: not all WSI platforms report VK_ERROR_OUT_OF_DATE_KHR
     // on resize, so rebuild eagerly when the window reported a size change.
-    if (zvkw.zvk.vkWindowResized(&zvkw.ctx.m_window)) {
-        zvkw.zvk.vkResetWindowResizedFlag(&zvkw.ctx.m_window);
+    if (zvkw.win.wasResized()) {
+        zvkw.win.clearResized();
+        const fb = zvkw.ctx.m_window.framebufferSize();
+        zvkw.ctx.m_window.width = fb.width;
+        zvkw.ctx.m_window.height = fb.height;
         try swapchain.recreateSwapchain();
     }
 
@@ -229,7 +229,7 @@ pub fn render(matrices: cs.CameraMatrices, reg: *rgstry.Registry, render_system:
     };
     zvkw.zvk.vkCmdSetScissor(cb, 0, 1, &scissor);
     zvkw.zvk.vkCmdBindPipeline(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipeline);
-    try render_system.update(reg, cb);
+    try render_system.update(reg, cb, dt);
     zvkw.zvk.vkCmdEndRendering(cb);
 
     const barrierPresent = zvkw.zvk.VkImageMemoryBarrier2{
@@ -291,12 +291,23 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
     return pipeline.uploadTexture(pixels, width, height);
 }
 
+/// Destroy scene textures and reset the bindless heap to the default texture.
+/// Used by render_system.onSceneUnload to reclaim slots deterministically.
+pub fn resetTextures() void {
+    pipeline.resetTextures();
+}
+
 pub fn shouldClose() bool {
-    return zvkw.zvk.vkWindowShouldClose(&zvkw.ctx.m_window);
+    return zvkw.ctx.m_window.shouldClose();
 }
 
 pub fn pollEvents() void {
-    zvkw.zvk.vkPollEvents();
+    zvkw.win.pollEvents();
+}
+
+/// The active window, exposed so the input system can read key state.
+pub fn windowPtr() *zvkw.win.Window {
+    return &zvkw.ctx.m_window;
 }
 
 /// Current swapchain aspect ratio (width / height), so the camera projection
