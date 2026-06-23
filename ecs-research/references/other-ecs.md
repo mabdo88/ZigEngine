@@ -1,7 +1,7 @@
 # Secondary ECS references (EnTT + other engines)
 
 Consult **after** Flecs (Step 3/4 in [`../SKILL.md`](../SKILL.md)). Use these to
-understand *why* a tradeoff exists, not as drop-in solutions — Strife runs on
+understand *why* a tradeoff exists, not as drop-in solutions — ZigEngine runs on
 Flecs (C API from Zig).
 
 ---
@@ -86,7 +86,7 @@ Reference: `https://docs.unity3d.com/Packages/com.unity.entities@latest`.
   structural changes move entities between chunks/archetypes.
 - **Baking pipeline:** authoring GameObjects are **baked** into runtime entity
   data offline — analogous to compiling prefabs/scenes into a fast runtime form;
-  worth mirroring for Strife scene/prefab loading.
+  worth mirroring for ZigEngine scene/prefab loading.
 - **Hybrid renderer / `IComponentData` vs `ISharedComponentData`:** shared
   components group entities by shared value (e.g. material) into the same chunk —
   similar in spirit to Flecs relationships/tags for batching draw calls.
@@ -99,7 +99,7 @@ Reference: `https://dev.epicgames.com/documentation/en-us/unreal-engine/mass-ent
   based on distance/importance, and **processors run different logic (or skip)
   per LOD tier**. Distant Knaves get cheap/low-frequency updates; near ones get
   full simulation.
-- Takeaway for Strife: model Knave updates as LOD-tiered systems (use a
+- Takeaway for ZigEngine: model Knave updates as LOD-tiered systems (use a
   `LodTier` tag/component or `CanToggle`) rather than running full per-entity
   logic on thousands of horde entities every frame.
 
@@ -130,6 +130,6 @@ Horde scale (thousands, Knaves)?
    (see Unreal Mass Entity) so most entities run cheap, low-frequency logic.
 ```
 
-**For Strife:** we're on Flecs (archetype). Lean into stable archetypes + SoA
+**For ZigEngine:** we're on Flecs (archetype). Lean into stable archetypes + SoA
 iteration for Emenders and rendering; defend against archetype-move cost for
 Knave hordes via tags/toggles/deferral and LOD tiers.

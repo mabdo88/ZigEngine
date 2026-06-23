@@ -12,6 +12,11 @@ the primary development target; Linux is partially supported (ECS tests,
 formatting, and the graphical build against the system Vulkan loader); macOS is
 best-effort.
 
+**Naming:** the engine is **ZigEngine** (the repository / build artifact). The
+target game built on it is **Strife** — an isometric ARPG whose hero-tier entities
+are **Emenders** and horde enemies are **Knaves**. These product names appear
+primarily in the ECS research module ([`ecs-research/`](ecs-research/)).
+
 ## Prime Directive
 
 Before writing code, preserve the architecture:
@@ -44,11 +49,11 @@ present), then use exact signatures. Structural templates are in
 ## ECS research lookup (read before any ECS work)
 
 **Before implementing any ECS feature, making an ECS architectural decision, or
-adding a new engine system in Strife, always consult
+adding a new engine system in ZigEngine, always consult
 [`ecs-research/SKILL.md`](ecs-research/SKILL.md) and fetch the relevant Flecs and
 EnTT documentation first.** Do not design ECS from memory. Name the problem,
 fetch the Flecs docs first (we use Flecs), cross-reference EnTT for the
-sparse-set tradeoff, then adapt to Strife — watching for archetype move cost,
+sparse-set tradeoff, then adapt to ZigEngine — watching for archetype move cost,
 deferred-operation semantics at frame boundaries, and singleton candidates
 (e.g. the Contiguity scale). Pre-digested patterns are in
 [`ecs-research/references/flecs-patterns.md`](ecs-research/references/flecs-patterns.md)

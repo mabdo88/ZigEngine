@@ -1,7 +1,7 @@
 # SKILL: ECS research (Flecs / EnTT) before engine work
 
 **Trigger:** any task that implements an ECS feature, makes an ECS architectural
-decision, or adds a new engine system in **Strife** (entities, components,
+decision, or adds a new engine system in **ZigEngine** (entities, components,
 queries, systems, observers, relationships, prefabs, lifecycle, scheduling,
 storage layout, deferred mutations, singletons, hierarchy).
 
@@ -13,7 +13,7 @@ and EnTT documentation *before* writing engine code.
 
 > Do not design or write ECS code from memory. Name the problem, fetch the Flecs
 > docs first (we use Flecs), cross-reference EnTT for the sparse-set view, then
-> adapt to Strife — copying exact signatures from what you fetched.
+> adapt to ZigEngine — copying exact signatures from what you fetched.
 
 ---
 
@@ -31,7 +31,7 @@ and EnTT documentation *before* writing engine code.
 | Deferred ops | **Automatic inside system callbacks**; explicit `ecs_defer_begin/end` outside. Commands replay at sync points | No global defer concept; structural changes during view iteration are restricted (use in-place / deferred-by-hand patterns) |
 | C / Zig compatibility | **Use the C API** (`ecs_*`, `flecs.h`) via Zig `@cImport`. The C++ API is unusable from Zig | C++17 template/header-only library — **not callable from Zig**; only useful as a reference model |
 
-Bottom line for Strife: we get Flecs's relationships, observers, and pipeline
+Bottom line for ZigEngine: we get Flecs's relationships, observers, and pipeline
 for free, but must respect **archetype move cost** (batch structural changes, use
 tags/toggles instead of churning components in hot loops) and **deferred
 semantics at frame boundaries** (GPU work). EnTT is the reference lens that
@@ -100,7 +100,7 @@ Always answer in this shape:
 1. **What Flecs does** (with the exact API from the fetched page).
 2. **What EnTT does** (the sparse-set contrast).
 3. **Key tradeoff** (cost / correctness / frame-safety).
-4. **Recommendation for Strife** (concrete: which API, where it runs, the
+4. **Recommendation for ZigEngine** (concrete: which API, where it runs, the
    archetype-move and frame-boundary caveats, a Zig C-API sketch).
 
 ---
@@ -126,16 +126,16 @@ first; the EnTT column is the contrast lens.
 
 ---
 
-## Strife-specific context (read every time)
+## ZigEngine-specific context (read every time)
 
-- **Engine:** Strife, written in **Zig**. ECS target binding is **Flecs via Zig
+- **Engine:** ZigEngine, written in **Zig**. ECS target binding is **Flecs via Zig
   C bindings**. **Always use the Flecs C API** (`ecs_*`, `ecs_set_hooks`,
   `ecs_observer`, `ecs_query`) through `@cImport` — the C++ API is not callable
   from Zig. (Note: the current `src/engine/ecs/` registry is a custom sparse-set
   implementation; treat this module as the decision procedure for adopting/
   adapting Flecs patterns — verify what the codebase actually links before
   emitting Flecs calls.)
-- **Game:** *Emenders* — isometric ARPG. **Emenders** (hero-tier, hundreds) and
+- **Game:** *Strife* — isometric ARPG built on ZigEngine. **Emenders** (hero-tier, hundreds) and
   **Knaves** (horde enemies, thousands). Horde scale means **add/remove churn is
   a real cost** under archetypes: prefer tags + `CanToggle` + deferred batches
   over per-frame component add/remove that triggers table moves.
@@ -169,4 +169,4 @@ first; the EnTT column is the contrast lens.
 - [ ] Using the **C API** with exact signatures copied from the fetched docs; a
       Zig `@cImport` sketch written.
 - [ ] Answer delivered in the **Step 5 structure** (Flecs → EnTT → tradeoff →
-      Strife recommendation).
+      ZigEngine recommendation).
