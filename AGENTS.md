@@ -97,14 +97,18 @@ How this maps onto the current code:
 
 - `Engine` (`src/engine/engine.zig`) is generic over a `WorldType` (currently
   `VulkanWorld`) and owns the allocator and main loop.
-- `VulkanWorld` (`src/engine/world.zig`) holds the `Registry` (entity lifecycle +
-  sparse-set component storage), an `EventBus` (pub/sub for `entity_destroyed` and
-  `scene_unloaded`), and a `SystemRunner` that calls `update(dt)` on systems in
-  priority order each frame.
-- System priorities: `InputSystem` (-100) → `SceneSystem` (0) → `MovementSystem`
-  (1) → `CameraSystem` (2) → `RenderSystem` (100).
+- `VulkanWorld` (`src/engine/world.zig`) holds the `Registry`
+  (`src/engine/ecs/entity/registry.zig` — entity lifecycle + sparse-set component
+  storage) and a `SystemRunner` (`src/engine/ecs/systems/system.zig`) that calls
+  each system's `update(dt)` in ascending-priority order every frame.
+- `EventBus` (`src/engine/ecs/event.zig`) is pub/sub for the `entity_destroyed`
+  and `scene_unloaded` events; the render system subscribes to clean up GPU
+  resources.
+- System priorities (lower runs first): `input_system` (-100) → `scene_system`
+  (0) → `movement_system` (1) → `camera_system` (2) → `render_system` (100), all
+  under `src/engine/ecs/systems/`.
 - Textures are bindless: a single descriptor array indexed by a push-constant
-  slot. `RenderSystem` caches uploaded textures by material ID and resets GPU
+  slot. The render system caches uploaded textures by material ID and resets GPU
   textures on scene unload via the event bus.
 
 ## Project layout
@@ -119,7 +123,11 @@ src/
 │   ├── world.zig                VulkanWorld: registry, system runner, per-system state
 │   ├── config.zig               window/camera/scene-list configuration
 │   ├── math.zig                 vector/matrix math
-│   └── ecs/components/          component definitions
+│   └── ecs/
+│       ├── components/          component definitions (components.zig)
+│       ├── entity/              entity handle, registry, sparse-set storage
+│       ├── systems/             input/scene/movement/camera/render + SystemRunner
+│       └── event.zig            EventBus (entity_destroyed, scene_unloaded)
 ├── renderer/                    Vulkan backend (see table below)
 ├── platform/                    GLFW + window/surface glue
 ├── resources/                   glTF (cgltf) + mesh/texture (stb) loading
@@ -161,5 +169,5 @@ Before proposing completion:
 - Vendored C/C++ deps in `deps/` are upstream code — do not hand-edit them.
 - Generated/build artifacts (`zig-out/`, `.zig-cache/`, `zig-pkg/`, `docs/`,
   `*.exe`, `*.pdb`) are git-ignored; never commit them.
-- Branch off `dev` for engine work unless told otherwise, and open a PR rather
-  than pushing to `main`.
+- `main` is the default, up-to-date branch. Do work on a feature branch and open a
+  PR rather than pushing directly to `main`.
