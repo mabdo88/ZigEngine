@@ -20,7 +20,7 @@ libs/glfw/docs/
 docs/
 
 # AI agent skills (tool-specific, not engine source)
-.cascade/
+# .cascade/ is tracked in git but hidden via dot-prefix
 
 # Graphify analysis output (generated)
 graphify-out/
