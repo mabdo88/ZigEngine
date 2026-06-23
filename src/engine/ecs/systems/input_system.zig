@@ -17,8 +17,46 @@ pub const InputSystemState = struct {
         else
             null;
 
-        const scene_index = target orelse return;
-        try requestScene(registry, scene_index);
+        if (target) |scene_index| {
+            try requestScene(registry, scene_index);
+        }
+
+        const fc = &shared_state.fly_cam;
+        const rmb = self.win.getMouseButton(window.MouseButton.right);
+        const cur = self.win.getCursorPos();
+
+        if (rmb) {
+            if (!fc.looking) {
+                fc.last_x = cur.x;
+                fc.last_y = cur.y;
+                fc.looking = true;
+                self.win.setCursorMode(.disabled);
+            } else {
+                const dx: f32 = @floatCast(cur.x - fc.last_x);
+                const dy: f32 = @floatCast(cur.y - fc.last_y);
+                fc.last_x = cur.x;
+                fc.last_y = cur.y;
+
+                const sensitivity: f32 = 0.002;
+                fc.yaw -= dx * sensitivity;
+                fc.pitch -= dy * sensitivity;
+
+                const max_pitch = std.math.pi / 2.0 - 0.01;
+                fc.pitch = std.math.clamp(fc.pitch, -max_pitch, max_pitch);
+            }
+        } else {
+            if (fc.looking) {
+                fc.looking = false;
+                self.win.setCursorMode(.normal);
+            }
+        }
+
+        fc.move_forward = 0.0;
+        fc.move_right = 0.0;
+        if (self.win.getKey(window.Key.w)) fc.move_forward += 1.0;
+        if (self.win.getKey(window.Key.s)) fc.move_forward -= 1.0;
+        if (self.win.getKey(window.Key.d)) fc.move_right += 1.0;
+        if (self.win.getKey(window.Key.a)) fc.move_right -= 1.0;
     }
 };
 

@@ -13,6 +13,14 @@ pub const Key = struct {
     pub const eight = c.GLFW_KEY_8;
     pub const nine = c.GLFW_KEY_9;
     pub const escape = c.GLFW_KEY_ESCAPE;
+    pub const w = c.GLFW_KEY_W;
+    pub const a = c.GLFW_KEY_A;
+    pub const s = c.GLFW_KEY_S;
+    pub const d = c.GLFW_KEY_D;
+};
+
+pub const MouseButton = struct {
+    pub const right = c.GLFW_MOUSE_BUTTON_RIGHT;
 };
 
 var g_resized: bool = false;
@@ -35,6 +43,28 @@ pub const Window = struct {
 
     pub fn getKey(self: *const Window, key: c_int) bool {
         return c.glfwGetKey(self.handle, key) == c.GLFW_PRESS;
+    }
+
+    pub fn getMouseButton(self: *const Window, button: c_int) bool {
+        return c.glfwGetMouseButton(self.handle, button) == c.GLFW_PRESS;
+    }
+
+    pub const CursorPos = struct { x: f64, y: f64 };
+
+    pub fn getCursorPos(self: *const Window) CursorPos {
+        var x: f64 = 0;
+        var y: f64 = 0;
+        c.glfwGetCursorPos(self.handle, &x, &y);
+        return .{ .x = x, .y = y };
+    }
+
+    pub const CursorMode = enum(c_int) {
+        normal = c.GLFW_CURSOR_NORMAL,
+        disabled = c.GLFW_CURSOR_DISABLED,
+    };
+
+    pub fn setCursorMode(self: *const Window, mode: CursorMode) void {
+        c.glfwSetInputMode(self.handle, c.GLFW_CURSOR, @intFromEnum(mode));
     }
 
     pub const Size = struct { width: u32, height: u32 };

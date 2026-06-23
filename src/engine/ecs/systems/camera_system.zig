@@ -5,14 +5,36 @@ const math = @import("../../math.zig");
 const SystemCreateCtx = @import("system.zig").SystemCreateCtx;
 const shared_state = @import("shared_state.zig");
 
+const move_speed: f32 = 10.0;
+
 pub const CameraSystemState = struct {
     aspect: f32 = 1.0,
 
     pub fn update(self: *CameraSystemState, registry: *Registry, dt: f32) anyerror!void {
-        _ = dt;
         var it = registry.Query(.{components.CameraComponent});
         const cam_entity = it.next() orelse return;
         const camera = registry.get(components.CameraComponent, cam_entity).?;
+
+        if (shared_state.window_ptr != null) {
+            const fc = &shared_state.fly_cam;
+            const forward = @Vector(3, f32){
+                @cos(fc.pitch) * @sin(fc.yaw),
+                @sin(fc.pitch),
+                @cos(fc.pitch) * @cos(fc.yaw),
+            };
+            const right = math.normalize(math.cross(forward, camera.up));
+
+            var move = forward * @as(@Vector(3, f32), @splat(fc.move_forward));
+            move += right * @as(@Vector(3, f32), @splat(fc.move_right));
+
+            const len_sq = @reduce(.Add, move * move);
+            if (len_sq > 0.0) {
+                move = math.normalize(move) * @as(@Vector(3, f32), @splat(move_speed * dt));
+                camera.position += move;
+            }
+
+            camera.target = camera.position + forward;
+        }
 
         const view = math.lookAt(camera.position, camera.target, camera.up);
         const projection = math.perspective(camera.fov, camera.near, camera.far, self.aspect);

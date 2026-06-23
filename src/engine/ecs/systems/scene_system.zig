@@ -9,6 +9,8 @@ const renderer = @import("../../../renderer/zvulkanSystem.zig");
 const render_system = @import("render_system.zig");
 const config_mod = @import("../../config.zig");
 const MeshCache = @import("../../../resources/meshCache.zig").MeshCache;
+const math = @import("../../math.zig");
+const shared_state = @import("shared_state.zig");
 
 pub const PreloadedScene = struct {
     primitives: []meshLoader.ScenePrimitive,
@@ -222,6 +224,10 @@ pub const SceneSystemState = struct {
             const c = registry.get(components.CameraComponent, cam).?;
             c.position = scene.camera_position;
             c.target = scene.camera_target;
+
+            const dir = math.normalize(c.target - c.position);
+            shared_state.fly_cam.yaw = std.math.atan2(dir[0], dir[2]);
+            shared_state.fly_cam.pitch = std.math.asin(std.math.clamp(dir[1], -1.0, 1.0));
         }
 
         std.log.info("scene_system: spawned '{s}' ({d} primitives)", .{ scene.name, preloaded.primitives.len });
