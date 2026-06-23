@@ -31,6 +31,16 @@ unless explicitly asked to test against Zig master / 0.17-dev. When upgrading Zi
 read the official release notes first and produce a migration report before
 editing.
 
+## Zig documentation lookup (read before writing Zig)
+
+**Before writing, fixing, migrating, or reviewing any Zig code, always consult
+[`zig-docs/SKILL.md`](zig-docs/SKILL.md) and fetch the relevant live documentation
+first.** Zig breaks compatibility nearly every release, so do not write Zig from
+memory — resolve the target version, fetch the matching language ref / stdlib /
+release notes (and confirm against the installed toolchain's stdlib source when
+present), then use exact signatures. Structural templates are in
+[`zig-docs/references/patterns.md`](zig-docs/references/patterns.md).
+
 ## Setup
 
 - **Dependencies:** all C/C++ deps (GLFW, VMA, cgltf, stb) are vendored under
