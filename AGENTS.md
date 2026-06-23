@@ -12,6 +12,11 @@ the primary development target; Linux is partially supported (ECS tests,
 formatting, and the graphical build against the system Vulkan loader); macOS is
 best-effort.
 
+**Naming:** the engine is named **Strife** and its target game is **Emenders**
+(an isometric ARPG). The repository / build artifact is `ZigEngine`; "Strife" and
+"ZigEngine" refer to the same engine. These product names appear primarily in the
+ECS research module ([`ecs-research/`](ecs-research/)).
+
 ## Prime Directive
 
 Before writing code, preserve the architecture:
