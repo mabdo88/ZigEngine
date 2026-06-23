@@ -1,13 +1,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const rgstry = @import("../engine/registry.zig");
+const rgstry = @import("../engine/ecs/entity/registry.zig");
 const rs = @import("renderSystem.zig").RenderSystem;
-const cs = @import("cameraSystem.zig");
 const zvkw = @import("zVulkanContext.zig");
 const upload = @import("upload.zig");
 const device = @import("device.zig");
 const swapchain = @import("swapchain.zig");
 const pipeline = @import("pipeline.zig");
+const material = @import("material.zig");
+const event = @import("../engine/ecs/event.zig");
+const math = @import("../engine/math.zig");
 
 fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
@@ -15,15 +17,10 @@ fn check(result: zvkw.zvk.VkResult) !void {
 
 pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry, render_system: *rs) !void {
     zvkw.ctx.zallocator = zig_allocator;
-    render_system.* = rs.init(zig_allocator);
-    const windowCI = zvkw.zvk.VkWindowCreateInfo{
-        .title = title.?,
-        .width = WWidth,
-        .height = WHeight,
-        .resizable = true,
-    };
-    try zvkw.zvk.vkCreateWindow(windowCI, &zvkw.ctx.m_window);
-    zvkw.ctx.extensions = try zvkw.zvk.vkGetRequiredInstanceExtensions(zig_allocator);
+    render_system.* = try rs.initCapacity(zig_allocator, 256, 64);
+    try zvkw.win.init();
+    zvkw.ctx.m_window = try zvkw.win.create(title.?, WWidth, WHeight, true);
+    zvkw.ctx.extensions = try zvkw.win.requiredInstanceExtensions(zig_allocator);
 
     const appCI = zvkw.zvk.VkApplicationInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -35,6 +32,7 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
     };
     const instanceCI = zvkw.zvk.VkInstanceCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .flags = if (builtin.os.tag == .macos) zvkw.zvk.VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR else 0,
         .pApplicationInfo = &appCI,
         .enabledLayerCount = if (zvkw.enable_validation) 1 else 0,
         .ppEnabledLayerNames = if (zvkw.enable_validation) &zvkw.validationLayers else null,
@@ -44,30 +42,29 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
 
     const result = zvkw.zvk.vkCreateInstance(&instanceCI, null, &zvkw.ctx.m_instance);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateInstanceFailed;
-    zvkw.ctx.m_surface = try zvkw.zvk.vkCreateWindowSurface(&zvkw.ctx.m_window, zvkw.ctx.m_instance);
-    device.setupDebugMessenger();
-    try device.pickPhysicalDevice();
-    try device.createLogicalDevice();
-    try device.createAllocator();
-    try swapchain.createSwapchain();
-    try swapchain.createDepthImage();
-    try swapchain.createSyncObjects();
-    try swapchain.createCommandPool();
-    try pipeline.createDescriptorSetLayout();
-    try pipeline.createPipeline();
-    try pipeline.createDescriptorPool();
-    try pipeline.createDescriptorSets();
-    try pipeline.createShaderDataBuffers();
-    try pipeline.createSampler();
-    try pipeline.createDefaultTexture();
-    reg.setDestroyHook(@ptrCast(render_system), rs.onEntityDestroyed);
+    zvkw.ctx.m_surface = try zvkw.ctx.m_window.createSurface(zvkw.ctx.m_instance);
+    device.setupDebugMessenger(&zvkw.ctx);
+    try device.pickPhysicalDevice(&zvkw.ctx);
+    try device.createLogicalDevice(&zvkw.ctx);
+    try device.createAllocator(&zvkw.ctx);
+    try swapchain.createSwapchain(&zvkw.ctx);
+    try swapchain.createDepthImage(&zvkw.ctx);
+    try swapchain.createSyncObjects(&zvkw.ctx);
+    try swapchain.createCommandPool(&zvkw.ctx);
+    try pipeline.createDescriptorSetLayout(&zvkw.ctx);
+    try pipeline.createPipeline(&zvkw.ctx);
+    try pipeline.createDescriptorPool(&zvkw.ctx);
+    try pipeline.createDescriptorSets(&zvkw.ctx);
+    try pipeline.createShaderDataBuffers(&zvkw.ctx);
+    try pipeline.createSampler(&zvkw.ctx);
+    try material.createDefaultTexture(&zvkw.ctx);
+    try reg.events.subscribe(.entity_destroyed, @ptrCast(render_system), rs.onEntityDestroyed);
 }
 
 pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
+    _ = reg;
     _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
-    // Free extensions array
     zvkw.ctx.zallocator.free(zvkw.ctx.extensions);
-    // destroy textures
     for (0..zvkw.ctx.textureCount) |i| {
         zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.textureSlots[i].view, null);
         zvkw.vma.vmaDestroyImage(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.textureSlots[i].image), zvkw.ctx.textureSlots[i].allocation);
@@ -90,10 +87,6 @@ pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
     for (0..zvkw.max_frames_in_flight) |i| {
         zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.shaderDataBuffers[i].buffer), zvkw.ctx.shaderDataBuffers[i].allocation);
     }
-    // Drop the destroy hook before tearing down the GPU mesh map and allocator,
-    // so any later destroyEntity (e.g. in World.deinit) can't touch freed state.
-    reg.clearDestroyHook();
-    // Wait for all in-flight frames to complete before destroying mesh buffers
     for (0..zvkw.max_frames_in_flight) |i| {
         _ = zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[i], zvkw.zvk.VK_TRUE, std.math.maxInt(u64));
     }
@@ -118,29 +111,28 @@ pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
         }
     }
     zvkw.zvk.vkDestroyInstance(zvkw.ctx.m_instance, null);
-    zvkw.zvk.vkDestroyWindow(&zvkw.ctx.m_window);
+    zvkw.ctx.m_window.destroy();
+    zvkw.win.terminate();
 }
 
-pub fn render(matrices: cs.CameraMatrices, reg: *rgstry.Registry, render_system: *rs) !void {
+pub fn render(matrices: math.CameraMatrices, reg: *rgstry.Registry, render_system: *rs, dt: f32) !void {
     try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
 
-    // Window-driven resize: not all WSI platforms report VK_ERROR_OUT_OF_DATE_KHR
-    // on resize, so rebuild eagerly when the window reported a size change.
-    if (zvkw.zvk.vkWindowResized(&zvkw.ctx.m_window)) {
-        zvkw.zvk.vkResetWindowResizedFlag(&zvkw.ctx.m_window);
-        try swapchain.recreateSwapchain();
+    if (zvkw.win.wasResized()) {
+        zvkw.win.clearResized();
+        const fb = zvkw.ctx.m_window.framebufferSize();
+        zvkw.ctx.m_window.width = fb.width;
+        zvkw.ctx.m_window.height = fb.height;
+        try swapchain.recreateSwapchain(&zvkw.ctx);
     }
 
     const acquireResult = zvkw.zvk.vkAcquireNextImageKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, std.math.maxInt(u64), zvkw.ctx.imageAcquiredSemaphores[zvkw.ctx.frameIndex], null, &zvkw.ctx.imageIndex);
     if (acquireResult == zvkw.zvk.VK_ERROR_OUT_OF_DATE_KHR) {
-        // Surface changed (resize/display change). Rebuild and skip this frame.
-        try swapchain.recreateSwapchain();
+        try swapchain.recreateSwapchain(&zvkw.ctx);
         return;
     } else if (acquireResult != zvkw.zvk.VK_SUCCESS and acquireResult != zvkw.zvk.VK_SUBOPTIMAL_KHR) {
         return error.AcquireImageFailed;
     }
-    // Only reset the fence once we know we'll submit work that signals it,
-    // otherwise an early return above would leave it unsignaled and deadlock.
     try check(zvkw.zvk.vkResetFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex]));
 
     const uboData = zvkw.FrameUBO{
@@ -229,7 +221,7 @@ pub fn render(matrices: cs.CameraMatrices, reg: *rgstry.Registry, render_system:
     };
     zvkw.zvk.vkCmdSetScissor(cb, 0, 1, &scissor);
     zvkw.zvk.vkCmdBindPipeline(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipeline);
-    try render_system.update(reg, cb);
+    try render_system.update(reg, cb, dt);
     zvkw.zvk.vkCmdEndRendering(cb);
 
     const barrierPresent = zvkw.zvk.VkImageMemoryBarrier2{
@@ -274,33 +266,37 @@ pub fn render(matrices: cs.CameraMatrices, reg: *rgstry.Registry, render_system:
     };
     const presentResult = zvkw.zvk.vkQueuePresentKHR(zvkw.ctx.queue, &presentInfo);
     if (presentResult == zvkw.zvk.VK_ERROR_OUT_OF_DATE_KHR or presentResult == zvkw.zvk.VK_SUBOPTIMAL_KHR) {
-        try swapchain.recreateSwapchain();
+        try swapchain.recreateSwapchain(&zvkw.ctx);
     } else if (presentResult != zvkw.zvk.VK_SUCCESS) {
         return error.PresentImageFailed;
     }
     zvkw.ctx.frameIndex = (zvkw.ctx.frameIndex + 1) % zvkw.max_frames_in_flight;
 }
 
-/// Delegates to pipeline.uploadTextureBatched — kept here for callers that import zvulkanSystem.
 pub fn uploadTextureBatched(batch: *upload.UploadBatch, pixels: []const u8, width: u32, height: u32) !zvkw.TextureHandle {
-    return pipeline.uploadTextureBatched(batch, pixels, width, height);
+    return material.uploadTextureBatched(&zvkw.ctx, batch, pixels, width, height);
 }
 
-/// Delegates to pipeline.uploadTexture — kept here for callers that import zvulkanSystem.
 pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureHandle {
-    return pipeline.uploadTexture(pixels, width, height);
+    return material.uploadTexture(&zvkw.ctx, pixels, width, height);
+}
+
+pub fn resetTextures() void {
+    material.resetTextures(&zvkw.ctx);
 }
 
 pub fn shouldClose() bool {
-    return zvkw.zvk.vkWindowShouldClose(&zvkw.ctx.m_window);
+    return zvkw.ctx.m_window.shouldClose();
 }
 
 pub fn pollEvents() void {
-    zvkw.zvk.vkPollEvents();
+    zvkw.win.pollEvents();
 }
 
-/// Current swapchain aspect ratio (width / height), so the camera projection
-/// stays correct as the window is resized.
+pub fn windowPtr() *zvkw.win.Window {
+    return &zvkw.ctx.m_window;
+}
+
 pub fn aspectRatio() f32 {
     const h = zvkw.ctx.swapChainExtent.height;
     if (h == 0) return 1.0;

@@ -1,7 +1,6 @@
 const std = @import("std");
 const zvkw = @import("zVulkanContext.zig");
 
-/// Turns a VkResult into a Zig error so failed calls surface at the source.
 fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
 }
@@ -11,14 +10,12 @@ pub const StagingBuffer = struct {
     allocation: zvkw.vma.VmaAllocation,
     allocInfo: zvkw.vma.VmaAllocationInfo,
 
-    pub fn destroy(self: StagingBuffer) void {
-        zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(self.buffer), self.allocation);
+    pub fn destroy(self: StagingBuffer, ctx: *zvkw.VulkanContext) void {
+        zvkw.vma.vmaDestroyBuffer(ctx.vmaAllocator, @ptrCast(self.buffer), self.allocation);
     }
 };
 
-/// Creates a staging buffer with host-visible memory and maps it for writing.
-/// Caller must call destroy() on the returned buffer when done.
-pub fn createStagingBuffer(size: zvkw.zvk.VkDeviceSize) !StagingBuffer {
+pub fn createStagingBuffer(ctx: *zvkw.VulkanContext, size: zvkw.zvk.VkDeviceSize) !StagingBuffer {
     const stagingBufferCI = zvkw.zvk.VkBufferCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = size,
@@ -36,7 +33,7 @@ pub fn createStagingBuffer(size: zvkw.zvk.VkDeviceSize) !StagingBuffer {
     var stagingInfo: zvkw.vma.VmaAllocationInfo = undefined;
 
     if (zvkw.vma.vmaCreateBuffer(
-        zvkw.ctx.vmaAllocator,
+        ctx.vmaAllocator,
         @ptrCast(&stagingBufferCI),
         &stagingAllocCI,
         @ptrCast(&stagingBuffer),
@@ -51,17 +48,15 @@ pub fn createStagingBuffer(size: zvkw.zvk.VkDeviceSize) !StagingBuffer {
     };
 }
 
-/// Allocates and begins a one-time submit command buffer.
-/// Returns the command buffer. Caller must free it after submission.
-pub fn beginOneTimeCommandBuffer() !zvkw.zvk.VkCommandBuffer {
+pub fn beginOneTimeCommandBuffer(ctx: *zvkw.VulkanContext) !zvkw.zvk.VkCommandBuffer {
     const cbAllocInfo = zvkw.zvk.VkCommandBufferAllocateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .commandPool = zvkw.ctx.commandPool,
+        .commandPool = ctx.commandPool,
         .level = zvkw.zvk.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
     var cmd: zvkw.zvk.VkCommandBuffer = null;
-    try check(zvkw.zvk.vkAllocateCommandBuffers(zvkw.ctx.m_Device, &cbAllocInfo, &cmd));
+    try check(zvkw.zvk.vkAllocateCommandBuffers(ctx.m_Device, &cbAllocInfo, &cmd));
 
     const beginInfo = zvkw.zvk.VkCommandBufferBeginInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -72,44 +67,38 @@ pub fn beginOneTimeCommandBuffer() !zvkw.zvk.VkCommandBuffer {
     return cmd;
 }
 
-/// Ends, submits, and waits for a command buffer. Frees the command buffer.
-pub fn submitAndWait(cmd: zvkw.zvk.VkCommandBuffer) !void {
-    defer zvkw.zvk.vkFreeCommandBuffers(zvkw.ctx.m_Device, zvkw.ctx.commandPool, 1, &cmd);
+pub fn submitAndWait(ctx: *zvkw.VulkanContext, cmd: zvkw.zvk.VkCommandBuffer) !void {
+    defer zvkw.zvk.vkFreeCommandBuffers(ctx.m_Device, ctx.commandPool, 1, &cmd);
     const fenceCI = zvkw.zvk.VkFenceCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
     };
     var fence: zvkw.zvk.VkFence = null;
-    try check(zvkw.zvk.vkCreateFence(zvkw.ctx.m_Device, &fenceCI, null, &fence));
-    defer zvkw.zvk.vkDestroyFence(zvkw.ctx.m_Device, fence, null);
+    try check(zvkw.zvk.vkCreateFence(ctx.m_Device, &fenceCI, null, &fence));
+    defer zvkw.zvk.vkDestroyFence(ctx.m_Device, fence, null);
 
     const submitInfo = zvkw.zvk.VkSubmitInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd,
     };
-    try check(zvkw.zvk.vkQueueSubmit(zvkw.ctx.queue, 1, &submitInfo, fence));
-    try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &fence, zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
+    try check(zvkw.zvk.vkQueueSubmit(ctx.queue, 1, &submitInfo, fence));
+    try check(zvkw.zvk.vkWaitForFences(ctx.m_Device, 1, &fence, zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
 }
 
-/// A batch accumulates staging buffers and copy commands into a single
-/// command buffer. Call begin(), record copies, then submit().
-/// All staging buffers are freed automatically on submit().
 pub const UploadBatch = struct {
     cmd: zvkw.zvk.VkCommandBuffer,
+    ctx: *zvkw.VulkanContext,
     stagings: std.ArrayListUnmanaged(StagingBuffer) = .empty,
     stagings_alloc: std.mem.Allocator,
 
-    /// Begin a new upload batch.
-    pub fn begin(allocator: std.mem.Allocator) !UploadBatch {
+    pub fn begin(ctx: *zvkw.VulkanContext, allocator: std.mem.Allocator) !UploadBatch {
         return .{
-            .cmd = try beginOneTimeCommandBuffer(),
+            .cmd = try beginOneTimeCommandBuffer(ctx),
+            .ctx = ctx,
             .stagings_alloc = allocator,
         };
     }
 
-    /// Copy raw bytes into a device-local buffer. Creates the GPU buffer,
-    /// records a vkCmdCopyBuffer into the batch command buffer.
-    /// Returns the created GPU buffer and allocation — caller owns them.
     pub fn uploadBuffer(
         self: *UploadBatch,
         data: *const anyopaque,
@@ -118,7 +107,7 @@ pub const UploadBatch = struct {
         out_buffer: *zvkw.zvk.VkBuffer,
         out_allocation: *zvkw.vma.VmaAllocation,
     ) !void {
-        const staging = try createStagingBuffer(size);
+        const staging = try createStagingBuffer(self.ctx, size);
         try self.stagings.append(self.stagings_alloc, staging);
 
         @memcpy(
@@ -135,7 +124,7 @@ pub const UploadBatch = struct {
             .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
         };
         if (zvkw.vma.vmaCreateBuffer(
-            zvkw.ctx.vmaAllocator,
+            self.ctx.vmaAllocator,
             @ptrCast(&bufferCI),
             &bufferAllocCI,
             @ptrCast(out_buffer),
@@ -147,8 +136,6 @@ pub const UploadBatch = struct {
         zvkw.zvk.vkCmdCopyBuffer(self.cmd, @ptrCast(staging.buffer), out_buffer.*, 1, &copy);
     }
 
-    /// Record an image copy from a staging buffer into a VkImage.
-    /// The staging buffer is appended to the batch — freed on submit.
     pub fn uploadImage(
         self: *UploadBatch,
         pixels: []const u8,
@@ -157,7 +144,7 @@ pub const UploadBatch = struct {
         image: zvkw.zvk.VkImage,
     ) !void {
         const size: zvkw.zvk.VkDeviceSize = @intCast(pixels.len);
-        const staging = try createStagingBuffer(size);
+        const staging = try createStagingBuffer(self.ctx, size);
         try self.stagings.append(self.stagings_alloc, staging);
 
         @memcpy(
@@ -165,7 +152,6 @@ pub const UploadBatch = struct {
             pixels,
         );
 
-        // Transition: undefined → transfer dst
         const barrier_to_dst = zvkw.zvk.VkImageMemoryBarrier{
             .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_UNDEFINED,
@@ -208,7 +194,6 @@ pub const UploadBatch = struct {
             zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
         );
 
-        // Transition: transfer dst → shader read
         const barrier_to_read = zvkw.zvk.VkImageMemoryBarrier{
             .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -234,12 +219,10 @@ pub const UploadBatch = struct {
         );
     }
 
-    /// End the batch: submits the command buffer, waits for completion,
-    /// then destroys all staging buffers.
     pub fn submit(self: *UploadBatch) !void {
         try check(zvkw.zvk.vkEndCommandBuffer(self.cmd));
-        try submitAndWait(self.cmd);
-        for (self.stagings.items) |s| s.destroy();
+        try submitAndWait(self.ctx, self.cmd);
+        for (self.stagings.items) |s| s.destroy(self.ctx);
         self.stagings.deinit(self.stagings_alloc);
     }
 };

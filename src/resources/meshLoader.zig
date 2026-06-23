@@ -4,20 +4,17 @@ const stbi = @cImport({
     @cInclude("../../deps/stb/stb_image.h");
 });
 
-const components = @import("../components/components.zig");
+const components = @import("../engine/ecs/components/components.zig");
+const math = @import("../engine/math.zig");
 
-/// Raw CPU-side mesh data. Owned by GltfScene — do not free individually.
 pub const MeshData = struct {
     vertices: []components.Vertex,
     indices: []u32,
 };
 
-/// Adapter for cgltf_node that provides typed access to transform fields.
-/// Avoids using `anytype` against C pointer fields (Bug #6).
 pub const NodeView = struct {
     node: *gltf.cgltf_node,
 
-    /// Returns the local-space transform as a 4x4 column-major matrix.
     pub fn localTransform(self: NodeView) [4][4]f32 {
         const node = self.node;
         if (node.has_matrix != 0) {
@@ -29,7 +26,6 @@ pub const NodeView = struct {
         const rq = if (node.has_rotation != 0) node.rotation else [4]f32{ 0, 0, 0, 1 };
         const sc = if (node.has_scale != 0) node.scale else [3]f32{ 1, 1, 1 };
 
-        // Quaternion to rotation matrix
         const x = rq[0]; const y = rq[1]; const z = rq[2]; const w = rq[3];
         const rot: [4][4]f32 = .{
             .{ 1 - 2*(y*y + z*z),   2*(x*y + w*z),     2*(x*z - w*y), 0 },
@@ -38,7 +34,6 @@ pub const NodeView = struct {
             .{               0,                 0,                   0, 1 },
         };
 
-        // Scale then rotate then translate (TRS)
         var m = rot;
         for (0..3) |c| {
             m[c][0] *= sc[0];
@@ -51,32 +46,24 @@ pub const NodeView = struct {
         return m;
     }
 
-    /// Returns the parent node as a NodeView, or null if no parent.
     pub fn parent(self: NodeView) ?NodeView {
         if (self.node.parent == null) return null;
         return NodeView{ .node = @ptrCast(self.node.parent) };
     }
 };
 
-/// Raw CPU-side material data (base color texture). Owned by GltfScene.
-/// Free pixels with the allocator passed to loadgltf after GPU upload.
 pub const MaterialData = struct {
     pixels: []u8,
     width: u32,
     height: u32,
 };
 
-/// A single renderable primitive: references into GltfScene.meshes and
-/// GltfScene.materials, plus the node-space transform from the scene graph.
 pub const ScenePrimitive = struct {
     mesh_idx: u32,
     material_idx: u32,
-    /// Column-major 4x4 transform extracted from the glTF node hierarchy.
     transform: [4][4]f32,
 };
 
-/// The result of loading a glTF file. Caller owns this and must call deinit.
-/// GPU uploads should happen before deinit so pixels/vertices/indices can be freed.
 pub const GltfScene = struct {
     meshes: []MeshData,
     materials: []MaterialData,
@@ -97,8 +84,6 @@ pub const GltfScene = struct {
     }
 };
 
-/// Loads a glTF file into a GltfScene entirely on the calling thread (CPU only).
-/// Caller must call scene.deinit() after GPU uploads are complete.
 pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
     var options = std.mem.zeroes(gltf.cgltf_options);
     var data: [*c]gltf.cgltf_data = null;
@@ -110,8 +95,6 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
     if (result != gltf.cgltf_result_success) return error.gltfLoadBuffersFailed;
     if (data.*.meshes_count == 0) return error.gltfNoMeshes;
 
-    // --- Pass 1: load unique meshes (one per cgltf mesh primitive) ---
-    // Map: cgltf_primitive pointer → mesh index in output array
     const PrimMeshMap = std.AutoHashMap(usize, u32);
     var prim_to_mesh = PrimMeshMap.init(allocator);
     defer prim_to_mesh.deinit();
@@ -177,7 +160,6 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
     }
     if (mesh_list.items.len == 0) return error.gltfNoPrimitives;
 
-    // --- Pass 2: load unique materials (deduplicated by cgltf_material pointer) ---
     const MatMap = std.AutoHashMap(usize, u32);
     var mat_map = MatMap.init(allocator);
     defer mat_map.deinit();
@@ -188,7 +170,6 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
         mat_list.deinit(allocator);
     }
 
-    // Walk all primitives to collect materials
     for (0..data.*.meshes_count) |mi| {
         const cgltf_mesh = data.*.meshes[mi];
         for (0..cgltf_mesh.primitives_count) |pi| {
@@ -237,11 +218,10 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
         }
     }
 
-    // --- Pass 3: build ScenePrimitive list by walking the node hierarchy ---
     var prim_list: std.ArrayListUnmanaged(ScenePrimitive) = .empty;
     errdefer prim_list.deinit(allocator);
 
-    const identity = identityMatrix();
+    const identity = math.identityMatrix();
     for (0..data.*.nodes_count) |ni| {
         const node_raw = &data.*.nodes[ni];
         if (node_raw.mesh == null) continue;
@@ -262,7 +242,6 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
         }
     }
 
-    // Fallback: if no nodes reference meshes, emit one primitive per mesh at identity
     if (prim_list.items.len == 0) {
         for (0..mesh_list.items.len) |mesh_idx| {
             try prim_list.append(allocator, .{
@@ -285,35 +264,12 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
     };
 }
 
-fn identityMatrix() [4][4]f32 {
-    return .{
-        .{ 1, 0, 0, 0 },
-        .{ 0, 1, 0, 0 },
-        .{ 0, 0, 1, 0 },
-        .{ 0, 0, 0, 1 },
-    };
-}
-
-/// Multiplies two column-major 4x4 matrices: result = a * b
-fn matMul(a: [4][4]f32, b: [4][4]f32) [4][4]f32 {
-    var r: [4][4]f32 = std.mem.zeroes([4][4]f32);
-    for (0..4) |row| {
-        for (0..4) |col| {
-            for (0..4) |k| {
-                r[col][row] += a[k][row] * b[col][k];
-            }
-        }
-    }
-    return r;
-}
-
-/// Walks the parent chain to compute the world-space transform for a node.
 fn nodeWorldTransform(node: *gltf.cgltf_node) [4][4]f32 {
     var view = NodeView{ .node = node };
     var local = view.localTransform();
     var p = view.parent();
     while (p) |pv| {
-        local = matMul(pv.localTransform(), local);
+        local = math.matMul(pv.localTransform(), local);
         p = pv.parent();
     }
     return local;

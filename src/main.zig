@@ -1,12 +1,14 @@
+const std = @import("std");
 const Engine = @import("engine/engine.zig").Engine;
-const VulkanECSWorld = @import("engine/vulkan_ecs_world.zig").VulkanECSWorld;
+const VulkanWorld = @import("engine/world.zig").VulkanWorld;
+const config = @import("engine/config.zig");
 
 pub fn main() !void {
-    var engine = Engine{};
-    engine.init();
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+
+    var engine: Engine(VulkanWorld) = undefined;
+    try engine.init(gpa.allocator(), config.default);
     defer engine.deinit();
-
-    engine.addWorld(VulkanECSWorld.factory());
-
-    try engine.run(0);
+    try engine.run();
 }

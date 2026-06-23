@@ -67,11 +67,28 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("user32", .{});
         exe.root_module.linkSystemLibrary("shell32", .{});
         exe.root_module.linkSystemLibrary("vulkan-1", .{});
-    } else {
-        // Linux: system Vulkan headers/loader + native Xlib windowing.
-        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        // glfw3.lib is an import library; ship glfw3.dll next to the exe.
+        const install_glfw_dll = b.addInstallBinFile(b.path("deps/glfw/lib/glfw3.dll"), "glfw3.dll");
+        b.getInstallStep().dependOn(&install_glfw_dll.step);
+    } else if (os_tag == .macos) {
+        // macOS: system GLFW + Vulkan via MoltenVK + required frameworks.
+        // Best-effort/untested: assumes GLFW + Vulkan SDK (MoltenVK) installed
+        // (e.g. via Homebrew / the LunarG SDK).
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/local/include" });
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+        exe.root_module.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+        exe.root_module.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
+        exe.root_module.linkSystemLibrary("glfw", .{});
         exe.root_module.linkSystemLibrary("vulkan", .{});
-        exe.root_module.linkSystemLibrary("X11", .{});
+        exe.root_module.linkFramework("Cocoa", .{});
+        exe.root_module.linkFramework("IOKit", .{});
+        exe.root_module.linkFramework("QuartzCore", .{});
+        exe.root_module.linkFramework("Metal", .{});
+    } else {
+        // Linux: system GLFW (pulls in the windowing system) + Vulkan loader.
+        exe.root_module.addIncludePath(.{ .cwd_relative = "/usr/include" });
+        exe.root_module.linkSystemLibrary("glfw", .{});
+        exe.root_module.linkSystemLibrary("vulkan", .{});
     }
 
     const vma_module = vma_translate.createModule();
