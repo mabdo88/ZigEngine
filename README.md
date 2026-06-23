@@ -4,7 +4,7 @@ A custom 3D game engine written in [Zig](https://ziglang.org/), built on a moder
 
 ZigEngine started life as a C++ project and was rewritten in Zig for its simplicity, explicit control over memory, and first-class C interop. It is the foundation for an in-development game with its own Game Design Document — the current focus is getting the core engine systems solid before gameplay work begins.
 
-> **Naming:** the engine is also referred to as **Strife** and its target game as **Emenders** (an isometric ARPG). "Strife" and "ZigEngine" are the same engine; the product names are used in the [`ecs-research/`](ecs-research/) module.
+> **Naming:** the engine is **ZigEngine**; the game being built on it is **Strife**, an isometric ARPG (hero-tier entities are **Emenders**, horde enemies are **Knaves**). These product names appear in the [`ecs-research/`](ecs-research/) module.
 
 > **Status:** early / pre-alpha. The renderer loads glTF models with PBR base-color textures, scenes can be hot-swapped at runtime, and the ECS drives a priority-ordered system pipeline with delta-time updates. APIs change frequently (see [Platform support](#platform-support)).
 

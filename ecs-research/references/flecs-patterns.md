@@ -3,7 +3,7 @@
 Templates only — **confirm exact signatures against the live Flecs docs for your
 version** (see [`../SKILL.md`](../SKILL.md) Step 2). Facts below were verified
 against the Flecs v4.x docs (`flecs.dev/flecs/`) and the C component API
-(`group__components.html`). For Strife, **always use the C API from Zig**
+(`group__components.html`). For ZigEngine, **always use the C API from Zig**
 (`@cImport "flecs.h"`); the C++ API is not callable from Zig.
 
 ---
@@ -120,7 +120,7 @@ ecs_defer_begin(world);
 ecs_defer_end(world);
 ```
 
-Why it matters for Strife/Vulkan: do not assume mid-frame visibility of deferred
+Why it matters for ZigEngine/Vulkan: do not assume mid-frame visibility of deferred
 changes, and don't drive **unsynchronized GPU mutations** from a callback that
 may run during command recording. Stage GPU uploads to a safe frame boundary.
 
@@ -176,7 +176,7 @@ ecs_entity_t s = ecs_system(world, {
 });
 ```
 
-Map Strife's existing priority chain (input → scene → movement → camera →
+Map ZigEngine's existing priority chain (input → scene → movement → camera →
 render) onto phases + `DependsOn` rather than hand-tuned integer priorities.
 
 ## 8. Cached vs uncached queries
