@@ -12,11 +12,12 @@ ZigEngine started life as a C++ project and was rewritten in Zig for its simplic
 
 - **Vulkan 1.3 renderer** using dynamic rendering (`VK_KHR_dynamic_rendering`) — no render passes or framebuffers.
 - **Sparse-set ECS** with generational entity handles, type-safe component storage, and a multi-component query iterator.
-- **Priority-ordered system pipeline** — systems register with a priority value and run in order each frame via `SystemRunner`.
+- **Priority-ordered system pipeline** — systems are declared as `SystemDesc` entries in `all_systems.zig` and managed by `SystemManager`, which handles `create`/`destroy` lifecycle and runs `update(dt)` in ascending-priority order each frame.
 - **Scene management** — scenes are config-driven entities; press `1` / `2` at runtime to hot-swap between the Duck and House scenes. Active scene unload/load is handled by `SceneSystem` with `SceneActiveTag` / `ScenePendingTag` markers.
 - **Event bus** — decoupled pub/sub for `entity_destroyed` and `scene_unloaded` events, used by the render system to clean up GPU resources.
-- **Input system** — GLFW keyboard input polled each frame; currently drives scene switching.
+- **Input system** — GLFW keyboard/mouse input polled each frame; drives scene switching and fly-camera controls (right-mouse-drag look, WASD movement).
 - **Movement system** — delta-time-based animation (e.g. rotating the duck model).
+- **Fly camera** — right-mouse-button mouse-look with pitch clamping and WASD movement at a fixed speed, integrated into `CameraSystem` via `shared_state`.
 - **Config-driven initialization** — window properties, camera defaults, and scene list are declared in `config.zig`.
 - **Delta-time update loop** — `Engine.run` computes frame delta time and passes it to `World.update`.
 - **glTF model loading** via [`cgltf`](https://github.com/jkuhlmann/cgltf) (positions, normals, UVs, indices, PBR base-color textures, node transforms).
@@ -29,6 +30,9 @@ ZigEngine started life as a C++ project and was rewritten in Zig for its simplic
 - **Slang shaders** compiled to SPIR-V.
 - **Depth buffering**, per-frame uniform buffers, and double-buffered frames in flight.
 - **Leak-checked allocation** in debug builds via Zig's `DebugAllocator`, with Vulkan validation layers enabled automatically in debug mode.
+- **Allocation-error-safe ECS** — `errdefer` rollback in component storage and registry; generation-overflow slot retirement prevents entity ID reuse collisions.
+- **Background scene preloading** — non-active scenes load on a background thread; GPU uploads are deferred to the main thread and gate scene activation until complete.
+- **Cross-system shared state** — `shared_state.zig` exposes globals (window pointer, aspect ratio, fly-camera input) to systems without explicit wiring.
 
 ## Architecture
 
@@ -36,16 +40,19 @@ The engine is organized around an ECS core with a priority-ordered system pipeli
 
 ```
 Engine(WorldType)           generic engine shell — owns allocator, runs main loop
-└── VulkanWorld             scene state: registry, system runner, per-system state
+└── VulkanWorld             scene state: registry, system manager
     ├── Registry            entity lifecycle + component storage (sparse set)
     │   ├── ComponentStorage(T)  dense component arrays with sparse index map
+    │   ├── MeshCache         deduplicated mesh storage keyed by mesh ID
     │   └── EventBus        pub/sub for entity_destroyed, scene_unloaded
-    ├── SystemRunner        priority-sorted list of systems, calls update(dt) each frame
-    └── Systems (registered by priority)
-        ├── InputSystem     polls GLFW keys, requests scene switches        (priority -100)
-        ├── SceneSystem     loads/unloads scenes, spawns mesh entities       (priority 0)
+    ├── SystemManager      create/destroy lifecycle + priority-sorted update
+    │   └── all_systems.zig  declarative SystemDesc array (Input → Scene → Movement → Camera → Render)
+    ├── shared_state.zig   cross-system globals: window ptr, aspect ratio, fly-cam input
+    └── Systems (update order by priority)
+        ├── InputSystem     GLFW keys/mouse, scene switching, fly-cam input   (priority -100)
+        ├── SceneSystem     background preload, load/unload, entity spawning    (priority 0)
         ├── MovementSystem  delta-time animation (e.g. duck rotation)         (priority 1)
-        ├── CameraSystem    builds view/projection matrices from CameraComponent (priority 2)
+        ├── CameraSystem    fly-cam movement + view/projection matrices       (priority 2)
         └── RenderSystem    uploads meshes/textures, records draw calls       (priority 100)
 ```
 
@@ -64,6 +71,7 @@ Components (`src/engine/ecs/components/components.zig`):
 | `SceneActiveTag`          | marks the currently active scene                       |
 | `ScenePendingTag`         | marks a scene requested for loading                     |
 | `SceneOwnedComponent`     | links spawned entities to their owning scene           |
+| `MeshCache`               | deduplicated mesh storage keyed by mesh ID (on Registry) |
 
 The Vulkan backend lives under `src/renderer/`:
 
@@ -81,12 +89,18 @@ The Vulkan backend lives under `src/renderer/`:
 
 ## Recent Improvements
 
+- **SystemManager lifecycle**: Replaced `SystemRunner` with `SystemManager` that manages `create`/`destroy` lifecycle. Systems are declared as `SystemDesc` entries in `all_systems.zig`; `SystemCreateCtx` passes allocator, registry, and config to each system's `create_fn`. Create order is descending priority (Render first), destroy is reverse create order.
+- **Fly camera controls**: Right-mouse-button mouse-look with pitch clamping and WASD movement. `InputSystem` captures mouse/keyboard state into `shared_state.fly_cam`; `CameraSystem` applies movement at 10 units/second. Window gained `getMouseButton`, `getCursorPos`, `setCursorMode`.
+- **Background scene preloading**: Non-active scenes load on a background thread via `SceneSystem`. GPU uploads are deferred to the main thread and gate scene activation until complete, eliminating stalls on scene switch.
+- **Cross-system shared state**: `shared_state.zig` exposes globals (window pointer, aspect ratio, `FlyCamInput`) to systems without explicit constructor wiring.
+- **Allocation-error-safe ECS**: `errdefer` rollback in `ComponentStorage.attachComponent` and throughout `zvulkanSystem.init`. Generation-overflow slot retirement in `Registry.destroyEntity` prevents entity ID reuse collisions at max generation.
+- **UploadBatch error safety**: Added `errdefer` cleanup for staging buffers and `cancel()` method for error-path disposal.
 - **Scene management system**: Config-driven scene entities with runtime hot-swapping. `SceneSystem` handles loading glTF scenes, spawning mesh entities with `SceneOwnedComponent`, and unloading the previous scene's entities. Press `1` / `2` to switch between Duck and House scenes.
 - **Event bus**: Added `EventBus` with `subscribe` / `emit` for decoupled communication. The render system subscribes to `scene_unloaded` to reset textures, and `entity_destroyed` triggers GPU mesh cleanup.
-- **Input system**: `InputSystem` polls GLFW keyboard state each frame and requests scene switches by tagging scene entities with `ScenePendingTag`.
+- **Input system**: `InputSystem` polls GLFW keyboard/mouse state each frame and requests scene switches by tagging scene entities with `ScenePendingTag`.
 - **Movement system**: Delta-time-based `MovementSystem` rotates the duck model's `TransformComponent` yaw at 90°/second.
 - **Config-driven initialization**: Engine config (window title/size, camera defaults, scene list) is declared in `config.zig` and consumed by `VulkanWorld.init`.
-- **Delta-time update loop**: `Engine.run` computes frame delta time via GLFW and passes it through `SystemRunner.update` to all systems.
+- **Delta-time update loop**: `Engine.run` computes frame delta time via GLFW and passes it through `SystemManager.update` to all systems.
 - **Renderer modularization**: Split the monolithic renderer into `device.zig`, `swapchain.zig`, `pipeline.zig`, `upload.zig`, and `material.zig`.
 - **Batched GPU uploads**: `UploadBatch` records multiple buffer/image transfers into a single command buffer for fewer submission stalls.
 - **Texture caching & deduplication**: `RenderSystem` caches uploaded textures by material ID to avoid re-uploading shared textures. GPU textures are reset on scene unload via the event bus.
@@ -115,11 +129,13 @@ src/
 │       │   ├── registry.zig      Registry: create/destroy, attach/get, Query
 │       │   └── componentStorage.zig  sparse-set ComponentStorage(T)
 │       └── systems/
-│           ├── system.zig        System + SystemRunner (priority-sorted)
-│           ├── input_system.zig  keyboard input → scene switching
-│           ├── scene_system.zig  scene load/unload, entity spawning
+│           ├── system.zig        SystemDesc + SystemManager (create/destroy lifecycle)
+│           ├── all_systems.zig   declarative SystemDesc array for all systems
+│           ├── shared_state.zig  cross-system globals (window ptr, aspect ratio, fly-cam)
+│           ├── input_system.zig  keyboard/mouse input → scene switching + fly-cam
+│           ├── scene_system.zig  background preload, scene load/unload, entity spawning
 │           ├── movement_system.zig  delta-time animation
-│           ├── camera_system.zig view/projection matrix computation
+│           ├── camera_system.zig fly-cam movement + view/projection matrices
 │           └── render_system.zig ECS render system (delegates to renderer)
 ├── renderer/                     Vulkan renderer
 │   ├── zVulkanContext.zig        VulkanContext struct + constants
@@ -139,6 +155,7 @@ src/
 │   └── zvkgl.zig                 Vulkan + GLFW C bindings
 ├── resources/                    resource loading
 │   ├── meshLoader.zig            glTF loader (NodeView, primitives, materials)
+│   ├── meshCache.zig             deduplicated mesh storage keyed by mesh ID
 │   └── cgltf.zig                 cgltf C bindings
 ├── shaders/                      Slang shaders + compiled SPIR-V
 │   ├── shader.slang              main vertex/fragment shader
@@ -214,6 +231,9 @@ Core-engine milestones being worked toward before gameplay:
 - [x] ~~Scene/asset management and a proper update loop with delta time~~
 - [x] ~~Input system~~
 - [x] ~~Cross-platform build (Windows/Linux/macOS link steps)~~
+- [x] ~~System lifecycle management (create/destroy)~~
+- [x] ~~Fly camera controls (mouse-look + WASD)~~
+- [x] ~~Background scene preloading~~
 
 ## Acknowledgements
 

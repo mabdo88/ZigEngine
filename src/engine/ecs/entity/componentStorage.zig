@@ -142,7 +142,6 @@ test "remove preserves other entities via swap" {
     try std.testing.expectEqual(@as(u32, 200), comp.value);
 }
 
-// --- Failing allocator for testing allocation-failure paths ---
 const FailingAllocator = struct {
     backing: std.mem.Allocator,
     fail_after: usize,
@@ -187,49 +186,39 @@ const FailingAllocator = struct {
     }
 };
 
-// P1: sparse[entity.index] is set before dense.append/entities.append succeed.
-// If dense.append fails, sparse points to an out-of-bounds dense index.
 test "attachComponent does not corrupt sparse when dense.append fails" {
     const TestComp = struct { value: u32 };
-    var fail_alloc = FailingAllocator.init(std.testing.allocator, 1); // fail on 2nd alloc (dense)
+    var fail_alloc = FailingAllocator.init(std.testing.allocator, 1);
     const alloc = fail_alloc.allocator();
 
     var storage = ComponentStorage(TestComp){};
     defer storage.deinit(std.testing.allocator);
 
     const entity = e.make(0, 0);
-    // sparse.append succeeds (alloc 1), dense.append fails (alloc 2)
     const result = storage.attachComponent(alloc, entity, .{ .value = 42 });
     try std.testing.expectError(error.OutOfMemory, result);
 
-    // After failure, sparse must not point to an invalid dense index
     try std.testing.expect(!storage.has(entity));
     try std.testing.expect(storage.get(entity) == null);
 }
 
-// P1: If entities.append fails, sparse points to a valid dense index but
-// entities array is out of sync, corrupting swap-removal.
 test "attachComponent does not corrupt sparse when entities.append fails" {
     const TestComp = struct { value: u32 };
-    var fail_alloc = FailingAllocator.init(std.testing.allocator, 2); // fail on 3rd alloc (entities)
+    var fail_alloc = FailingAllocator.init(std.testing.allocator, 2);
     const alloc = fail_alloc.allocator();
 
     var storage = ComponentStorage(TestComp){};
     defer storage.deinit(std.testing.allocator);
 
     const entity = e.make(0, 0);
-    // sparse.append succeeds (alloc 1), dense.append succeeds (alloc 2), entities.append fails (alloc 3)
     const result = storage.attachComponent(alloc, entity, .{ .value = 42 });
     try std.testing.expectError(error.OutOfMemory, result);
 
-    // After failure, sparse must not reference a dense slot with no matching entity
     try std.testing.expect(!storage.has(entity));
     try std.testing.expect(storage.get(entity) == null);
-    // dense should have been rolled back
     try std.testing.expectEqual(@as(usize, 0), storage.dense.items.len);
 }
 
-// Edge case: After a failed attach, a subsequent successful attach must work correctly.
 test "attachComponent succeeds after prior failure" {
     const TestComp = struct { value: u32 };
     var fail_alloc = FailingAllocator.init(std.testing.allocator, 1);
@@ -239,40 +228,33 @@ test "attachComponent succeeds after prior failure" {
     defer storage.deinit(std.testing.allocator);
 
     const entity = e.make(0, 0);
-    // First attempt fails (dense.append fails)
     const result = storage.attachComponent(alloc, entity, .{ .value = 42 });
     try std.testing.expectError(error.OutOfMemory, result);
 
-    // Second attempt with normal allocator should succeed
     try storage.attachComponent(std.testing.allocator, entity, .{ .value = 99 });
     try std.testing.expect(storage.has(entity));
     try std.testing.expectEqual(@as(u32, 99), storage.get(entity).?.value);
 }
 
-// Edge case: Failed attach on entity index > 0 must not corrupt sparse for other entities.
 test "attachComponent failure does not affect other entities" {
     const TestComp = struct { value: u32 };
     var storage = ComponentStorage(TestComp){};
     defer storage.deinit(std.testing.allocator);
 
     const e0 = e.make(0, 0);
-    const e1 = e.make(100, 0); // large index forces sparse reallocation
+    const e1 = e.make(100, 0);
     try storage.attachComponent(std.testing.allocator, e0, .{ .value = 100 });
 
-    // Now try to attach e1 with a failing allocator (fail on first alloc — sparse realloc)
     var fail_alloc = FailingAllocator.init(std.testing.allocator, 0);
     const alloc = fail_alloc.allocator();
     const result = storage.attachComponent(alloc, e1, .{ .value = 200 });
     try std.testing.expectError(error.OutOfMemory, result);
 
-    // e0 must still be intact
     try std.testing.expect(storage.has(e0));
     try std.testing.expectEqual(@as(u32, 100), storage.get(e0).?.value);
-    // e1 must not be present
     try std.testing.expect(!storage.has(e1));
 }
 
-// Edge case: Re-attach after remove must work correctly.
 test "re-attach after remove works" {
     const TestComp = struct { value: u32 };
     var storage = ComponentStorage(TestComp){};

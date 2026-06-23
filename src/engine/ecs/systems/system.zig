@@ -38,21 +38,18 @@ pub const SystemManager = struct {
             update_order[i] = i;
         }
 
-        // Create order: descending priority (Render first)
         std.mem.sort(usize, create_order, descs, struct {
             fn lessThan(d: []const SystemDesc, a: usize, b: usize) bool {
                 return d[a].priority > d[b].priority;
             }
         }.lessThan);
 
-        // Update order: ascending priority (Input first)
         std.mem.sort(usize, update_order, descs, struct {
             fn lessThan(d: []const SystemDesc, a: usize, b: usize) bool {
                 return d[a].priority < d[b].priority;
             }
         }.lessThan);
 
-        // Call create_fn in descending priority order
         for (create_order) |idx| {
             contexts[idx] = try descs[idx].create_fn(create_ctx);
         }
@@ -67,7 +64,6 @@ pub const SystemManager = struct {
     }
 
     pub fn deinit(self: *SystemManager, registry: *Registry) void {
-        // Destroy in reverse create order
         var i = self.create_order.len;
         while (i > 0) {
             i -= 1;
@@ -130,12 +126,10 @@ test "SystemManager sorts create_order descending and update_order ascending" {
     var manager = try SystemManager.init(std.testing.allocator, &descs, &create_ctx);
     defer manager.deinit(&reg);
 
-    // create_order: descending → low(10), mid(0), high(-5)
     try std.testing.expectEqualStrings("low", manager.descs[manager.create_order[0]].name);
     try std.testing.expectEqualStrings("mid", manager.descs[manager.create_order[1]].name);
     try std.testing.expectEqualStrings("high", manager.descs[manager.create_order[2]].name);
 
-    // update_order: ascending → high(-5), mid(0), low(10)
     try std.testing.expectEqualStrings("high", manager.descs[manager.update_order[0]].name);
     try std.testing.expectEqualStrings("mid", manager.descs[manager.update_order[1]].name);
     try std.testing.expectEqualStrings("low", manager.descs[manager.update_order[2]].name);
@@ -168,7 +162,6 @@ test "update calls systems in ascending priority order" {
     var manager = try SystemManager.init(std.testing.allocator, &descs, &create_ctx);
     defer manager.deinit(&reg);
 
-    // Free the noopCreate'd contexts, then override with our trackers
     for (manager.contexts) |c| {
         const slot: *u8 = @ptrCast(@alignCast(c));
         std.testing.allocator.destroy(slot);
