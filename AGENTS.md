@@ -41,6 +41,21 @@ release notes (and confirm against the installed toolchain's stdlib source when
 present), then use exact signatures. Structural templates are in
 [`zig-docs/references/patterns.md`](zig-docs/references/patterns.md).
 
+## ECS research lookup (read before any ECS work)
+
+**Before implementing any ECS feature, making an ECS architectural decision, or
+adding a new engine system in Strife, always consult
+[`ecs-research/SKILL.md`](ecs-research/SKILL.md) and fetch the relevant Flecs and
+EnTT documentation first.** Do not design ECS from memory. Name the problem,
+fetch the Flecs docs first (we use Flecs), cross-reference EnTT for the
+sparse-set tradeoff, then adapt to Strife — watching for archetype move cost,
+deferred-operation semantics at frame boundaries, and singleton candidates
+(e.g. the Contiguity scale). Pre-digested patterns are in
+[`ecs-research/references/flecs-patterns.md`](ecs-research/references/flecs-patterns.md)
+(Flecs C API) and
+[`ecs-research/references/other-ecs.md`](ecs-research/references/other-ecs.md)
+(EnTT, Bevy, Unity DOTS, Unreal Mass Entity).
+
 ## Setup
 
 - **Dependencies:** all C/C++ deps (GLFW, VMA, cgltf, stb) are vendored under
