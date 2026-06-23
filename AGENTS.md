@@ -3,19 +3,36 @@
 Guidance for AI coding agents working in this repository. Human contributors may
 also find it useful, but the canonical project overview is [`README.md`](README.md).
 
-## Project overview
+## Project Identity
 
-ZigEngine is a custom 3D game engine written in [Zig](https://ziglang.org/), built
-on a **Vulkan 1.3** renderer (dynamic rendering, no render passes) and a
-data-oriented **Entity-Component-System (ECS)** with a priority-ordered system
-pipeline. It is early / pre-alpha — APIs change frequently. Windows is the primary
-development target; Linux is partially supported (ECS tests, formatting, and the
-graphical build against the system Vulkan loader); macOS is best-effort.
+This repository is a Zig game engine and game project built on a **Vulkan 1.3**
+renderer (dynamic rendering, no render passes) and an **ECS**-structured,
+data-oriented design. It is early / pre-alpha — APIs change frequently. Windows is
+the primary development target; Linux is partially supported (ECS tests,
+formatting, and the graphical build against the system Vulkan loader); macOS is
+best-effort.
+
+## Prime Directive
+
+Before writing code, preserve the architecture:
+
+- Data-oriented design first.
+- ECS systems operate over dense component data.
+- Avoid object-oriented entity hierarchies.
+- Avoid hidden allocations in hot paths.
+- Prefer explicit ownership, stable handles, and cache-friendly storage.
+- Renderer code must respect Vulkan lifetime, synchronization, descriptor,
+  pipeline, and command buffer rules.
+
+## Zig Version
+
+Target **Zig 0.16.0** stable (`minimum_zig_version = "0.16.0"` in `build.zig.zon`)
+unless explicitly asked to test against Zig master / 0.17-dev. When upgrading Zig,
+read the official release notes first and produce a migration report before
+editing.
 
 ## Setup
 
-- **Zig:** requires `minimum_zig_version = 0.16.0` (see `build.zig.zon`). Use that
-  version or newer.
 - **Dependencies:** all C/C++ deps (GLFW, VMA, cgltf, stb) are vendored under
   `deps/` and built from source by `build.zig`. There are no `zig fetch`
   dependencies (`.dependencies = .{}`).
@@ -53,6 +70,43 @@ export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 
 At runtime, press `1` / `2` to hot-swap between the Duck and House scenes.
 
+## Engine Architecture
+
+Core layers:
+
+- platform
+- memory
+- ecs
+- assets
+- renderer_vulkan
+- gameplay
+- tools/editor
+
+ECS rules:
+
+- Entity IDs are handles, not objects.
+- Components are plain data.
+- Systems contain behavior.
+- Systems should process batches / archetypes / sparse sets, not individual heap
+  objects.
+- Avoid per-frame allocations.
+- Any new feature must document which components, systems, resources, and events
+  it adds.
+
+How this maps onto the current code:
+
+- `Engine` (`src/engine/engine.zig`) is generic over a `WorldType` (currently
+  `VulkanWorld`) and owns the allocator and main loop.
+- `VulkanWorld` (`src/engine/world.zig`) holds the `Registry` (entity lifecycle +
+  sparse-set component storage), an `EventBus` (pub/sub for `entity_destroyed` and
+  `scene_unloaded`), and a `SystemRunner` that calls `update(dt)` on systems in
+  priority order each frame.
+- System priorities: `InputSystem` (-100) → `SceneSystem` (0) → `MovementSystem`
+  (1) → `CameraSystem` (2) → `RenderSystem` (100).
+- Textures are bindless: a single descriptor array indexed by a push-constant
+  slot. `RenderSystem` caches uploaded textures by material ID and resets GPU
+  textures on scene unload via the event bus.
+
 ## Project layout
 
 ```
@@ -87,27 +141,21 @@ Vulkan backend files under `src/renderer/`:
 | `renderSystem.zig`   | `RenderSystem`: GPU mesh upload, refcounting, draw recording |
 | `vma_impl.cpp`       | VMA C++ implementation stub |
 
-## Architecture notes
+## Verification
 
-- `Engine` is generic over a `WorldType` (currently `VulkanWorld`) and owns the
-  allocator and main loop.
-- `VulkanWorld` holds the `Registry` (entity lifecycle + sparse-set component
-  storage), an `EventBus` (pub/sub for `entity_destroyed` and `scene_unloaded`),
-  and a `SystemRunner` that calls `update(dt)` on systems in priority order each
-  frame.
-- System priorities: `InputSystem` (-100) → `SceneSystem` (0) → `MovementSystem`
-  (1) → `CameraSystem` (2) → `RenderSystem` (100).
-- Textures are bindless: a single descriptor array indexed by a push-constant
-  slot. `RenderSystem` caches uploaded textures by material ID and resets GPU
-  textures on scene unload via the event bus.
+Before proposing completion:
+
+- Run formatting (`zig fmt src/`).
+- Run the Zig build/tests — at minimum `zig build test-ecs` (GPU-free); also
+  `zig build test` and `zig build` when a GPU and Vulkan are available.
+- Run relevant rendering or gameplay smoke tests if available (e.g. the headless
+  lavapipe run above).
+- Mention any skipped checks.
 
 ## Conventions for agents
 
-- **Always run `zig fmt src/` before committing.** CI / reviewers expect formatted
-  code.
-- **Validate changes with `zig build test-ecs`** (and `zig build test` when a GPU
-  and Vulkan are available). Don't claim a change builds graphically unless you
-  actually ran the Vulkan build.
+- Don't claim a change builds graphically unless you actually ran the Vulkan
+  build.
 - Keep edits minimal and idiomatic — match the surrounding Zig style; prefer
   explicit memory handling and avoid hidden allocations.
 - Vendored C/C++ deps in `deps/` are upstream code — do not hand-edit them.
