@@ -1,1 +1,0 @@
-{"nodes": [{"id": "mesh_loader", "label": "glTF Mesh Loader", "file_type": "code", "source_file": "src/resources/meshLoader.zig"}], "edges": [], "hyperedges": []}

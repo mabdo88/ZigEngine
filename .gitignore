@@ -18,3 +18,9 @@ libs/glfw/docs/
 
 # Documentation
 docs/
+
+# AI agent skills (tool-specific, not engine source)
+.cascade/
+
+# Graphify analysis output (generated)
+graphify-out/
