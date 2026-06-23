@@ -19,8 +19,11 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
     zvkw.ctx.zallocator = zig_allocator;
     render_system.* = try rs.initCapacity(&zvkw.ctx, zig_allocator, 256, 64);
     try zvkw.win.init();
+    errdefer zvkw.win.terminate();
     zvkw.ctx.m_window = try zvkw.win.create(title.?, WWidth, WHeight, true);
+    errdefer zvkw.ctx.m_window.destroy();
     zvkw.ctx.extensions = try zvkw.win.requiredInstanceExtensions(zig_allocator);
+    errdefer zig_allocator.free(zvkw.ctx.extensions);
 
     const appCI = zvkw.zvk.VkApplicationInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -42,22 +45,90 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
 
     const result = zvkw.zvk.vkCreateInstance(&instanceCI, null, &zvkw.ctx.m_instance);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateInstanceFailed;
+    errdefer zvkw.zvk.vkDestroyInstance(zvkw.ctx.m_instance, null);
+
     zvkw.ctx.m_surface = try zvkw.ctx.m_window.createSurface(zvkw.ctx.m_instance);
+    errdefer zvkw.zvk.vkDestroySurfaceKHR(zvkw.ctx.m_instance, zvkw.ctx.m_surface, null);
+
     device.setupDebugMessenger(&zvkw.ctx);
+    errdefer if (zvkw.enable_validation) {
+        if (zvkw.ctx.vkDestroyDebugUtilsMessengerEXT) |destroyFn| {
+            destroyFn(zvkw.ctx.m_instance, zvkw.ctx.m_debugMessenger, null);
+        }
+    };
+
     try device.pickPhysicalDevice(&zvkw.ctx);
     try device.createLogicalDevice(&zvkw.ctx);
+    errdefer zvkw.zvk.vkDestroyDevice(zvkw.ctx.m_Device, null);
+
     try device.createAllocator(&zvkw.ctx);
+    errdefer zvkw.vma.vmaDestroyAllocator(zvkw.ctx.vmaAllocator);
+
     try swapchain.createSwapchain(&zvkw.ctx);
+    errdefer {
+        for (zvkw.ctx.swapChainImageViews) |view| {
+            zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, view, null);
+        }
+        zvkw.ctx.zallocator.free(zvkw.ctx.swapChainImageViews);
+        zvkw.ctx.zallocator.free(zvkw.ctx.swapChainImages);
+        zvkw.zvk.vkDestroySwapchainKHR(zvkw.ctx.m_Device, zvkw.ctx.swapChain, null);
+    }
+
     try swapchain.createDepthImage(&zvkw.ctx);
+    errdefer {
+        zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.depthImageView, null);
+        zvkw.vma.vmaDestroyImage(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.depthImage), zvkw.ctx.depthImageAllocation);
+    }
+
     try swapchain.createSyncObjects(&zvkw.ctx);
+    errdefer {
+        for (0..zvkw.max_frames_in_flight) |i| {
+            zvkw.zvk.vkDestroyFence(zvkw.ctx.m_Device, zvkw.ctx.fences[i], null);
+            zvkw.zvk.vkDestroySemaphore(zvkw.ctx.m_Device, zvkw.ctx.imageAcquiredSemaphores[i], null);
+        }
+        for (zvkw.ctx.renderCompleteSemaphores) |semaphore| {
+            zvkw.zvk.vkDestroySemaphore(zvkw.ctx.m_Device, semaphore, null);
+        }
+        zvkw.ctx.zallocator.free(zvkw.ctx.renderCompleteSemaphores);
+    }
+
     try swapchain.createCommandPool(&zvkw.ctx);
+    errdefer zvkw.zvk.vkDestroyCommandPool(zvkw.ctx.m_Device, zvkw.ctx.commandPool, null);
+
     try pipeline.createDescriptorSetLayout(&zvkw.ctx);
+    errdefer {
+        zvkw.zvk.vkDestroyDescriptorSetLayout(zvkw.ctx.m_Device, zvkw.ctx.bindlessDescriptorSetLayout, null);
+        zvkw.zvk.vkDestroyDescriptorSetLayout(zvkw.ctx.m_Device, zvkw.ctx.uboDescriptorSetLayout, null);
+    }
+
     try pipeline.createPipeline(&zvkw.ctx);
+    errdefer {
+        zvkw.zvk.vkDestroyPipeline(zvkw.ctx.m_Device, zvkw.ctx.pipeline, null);
+        zvkw.zvk.vkDestroyPipelineLayout(zvkw.ctx.m_Device, zvkw.ctx.pipelineLayout, null);
+    }
+
     try pipeline.createDescriptorPool(&zvkw.ctx);
+    errdefer zvkw.zvk.vkDestroyDescriptorPool(zvkw.ctx.m_Device, zvkw.ctx.descriptorPool, null);
+
     try pipeline.createDescriptorSets(&zvkw.ctx);
     try pipeline.createShaderDataBuffers(&zvkw.ctx);
+    errdefer {
+        for (0..zvkw.max_frames_in_flight) |i| {
+            zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.shaderDataBuffers[i].buffer), zvkw.ctx.shaderDataBuffers[i].allocation);
+        }
+    }
+
     try pipeline.createSampler(&zvkw.ctx);
+    errdefer zvkw.zvk.vkDestroySampler(zvkw.ctx.m_Device, zvkw.ctx.bindlessSampler, null);
+
     try material.createDefaultTexture(&zvkw.ctx);
+    errdefer {
+        if (zvkw.ctx.textureCount > 0) {
+            zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.textureSlots[0].view, null);
+            zvkw.vma.vmaDestroyImage(zvkw.ctx.vmaAllocator, @ptrCast(zvkw.ctx.textureSlots[0].image), zvkw.ctx.textureSlots[0].allocation);
+        }
+    }
+
     try reg.events.subscribe(.entity_destroyed, @ptrCast(render_system), rs.onEntityDestroyed);
 }
 

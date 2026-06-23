@@ -127,6 +127,8 @@ pub const RenderSystem = struct {
         if (self.gpu_meshes.get(mesh_id)) |shared| {
             shared.refcount += 1;
             try self.entity_meshes.put(entity, mesh_id);
+            zvkw.vma.vmaDestroyBuffer(self.ctx.vmaAllocator, @ptrCast(gpu_mesh.vertexBuffer), gpu_mesh.vertexAllocation);
+            zvkw.vma.vmaDestroyBuffer(self.ctx.vmaAllocator, @ptrCast(gpu_mesh.indexBuffer), gpu_mesh.indexAllocation);
             self.allocator.destroy(gpu_mesh);
             return;
         }

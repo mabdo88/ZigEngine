@@ -84,7 +84,6 @@ pub const Registry = struct {
         const index = entity.index;
         self.events.emit(.{ .entity_destroyed = entity });
         if (self.generations.items[index] == std.math.maxInt(u32)) {
-            self.generations.items[index] += 1;
             self.component_masks.items[index] = 0;
         } else {
             self.generations.items[index] += 1;
@@ -516,4 +515,68 @@ test "get returns null for unregistered component type on entity" {
 
     const entity = try reg.create();
     try std.testing.expect(reg.get(components.CameraComponent, entity) == null);
+}
+
+// P3: At max generation, destroyEntity increments (wraps to 0 in wrapping mode,
+// traps in safe mode). The slot should be retired without wrapping or trapping.
+test "generation overflow retires slot without wrapping" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const entity = try reg.create();
+    // Simulate generation reaching max by setting both the slot and the handle
+    reg.generations.items[entity.index] = std.math.maxInt(u32);
+    const max_gen_entity = Entity.make(entity.index, std.math.maxInt(u32));
+
+    // This must not trap (safe mode) or wrap to 0
+    try reg.destroyEntity(max_gen_entity);
+
+    // Slot must not be recycled — a new entity should get a different index
+    const new_entity = try reg.create();
+    try std.testing.expect(new_entity.index != entity.index);
+}
+
+// Edge case: Multiple entities created after a retired slot should all skip it.
+test "retired slot is permanently skipped by create" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const e0 = try reg.create();
+    _ = try reg.create();
+
+    // Set e0's generation to max BEFORE destroying, then destroy
+    reg.generations.items[e0.index] = std.math.maxInt(u32);
+    const max_e0 = Entity.make(e0.index, std.math.maxInt(u32));
+    try reg.destroyEntity(max_e0);
+
+    // Create several more entities — none should reuse e0's index
+    for (0..5) |_| {
+        const new_e = try reg.create();
+        try std.testing.expect(new_e.index != e0.index);
+    }
+}
+
+// Edge case: Normal entity recycling still works alongside a retired slot.
+test "normal recycling works alongside retired slot" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const e0 = try reg.create();
+    const e1 = try reg.create();
+    const e2 = try reg.create();
+
+    // Retire e1's slot
+    reg.generations.items[e1.index] = std.math.maxInt(u32);
+    const max_e1 = Entity.make(e1.index, std.math.maxInt(u32));
+    try reg.destroyEntity(max_e1);
+
+    // Destroy e0 and e2 normally — they should be recycled
+    try reg.destroyEntity(e0);
+    try reg.destroyEntity(e2);
+
+    // Next create should reuse e0 or e2 (not e1)
+    const new_e = try reg.create();
+    try std.testing.expect(new_e.index == e0.index or new_e.index == e2.index);
+    try std.testing.expect(new_e.index != e1.index);
+    try std.testing.expect(new_e.generation > 0);
 }

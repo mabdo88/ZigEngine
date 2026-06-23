@@ -108,7 +108,9 @@ pub const UploadBatch = struct {
         out_allocation: *zvkw.vma.VmaAllocation,
     ) !void {
         const staging = try createStagingBuffer(self.ctx, size);
+        errdefer staging.destroy(self.ctx);
         try self.stagings.append(self.stagings_alloc, staging);
+        errdefer _ = self.stagings.pop();
 
         @memcpy(
             @as([*]u8, @ptrCast(@alignCast(staging.allocInfo.pMappedData)))[0..size],
@@ -145,7 +147,9 @@ pub const UploadBatch = struct {
     ) !void {
         const size: zvkw.zvk.VkDeviceSize = @intCast(pixels.len);
         const staging = try createStagingBuffer(self.ctx, size);
+        errdefer staging.destroy(self.ctx);
         try self.stagings.append(self.stagings_alloc, staging);
+        errdefer _ = self.stagings.pop();
 
         @memcpy(
             @as([*]u8, @ptrCast(@alignCast(staging.allocInfo.pMappedData)))[0..pixels.len],
@@ -240,5 +244,11 @@ pub const UploadBatch = struct {
         try submitAndWait(self.ctx, self.cmd);
         for (self.stagings.items) |s| s.destroy(self.ctx);
         self.stagings.deinit(self.stagings_alloc);
+    }
+
+    pub fn cancel(self: *UploadBatch) void {
+        for (self.stagings.items) |s| s.destroy(self.ctx);
+        self.stagings.deinit(self.stagings_alloc);
+        zvkw.zvk.vkFreeCommandBuffers(self.ctx.m_Device, self.ctx.commandPool, 1, &self.cmd);
     }
 };

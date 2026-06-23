@@ -74,6 +74,12 @@ pub const VulkanWorld = struct {
     fn preloadScenes(self: *VulkanWorld, scene_configs: []const config_mod.Config.SceneConfig) ![]scene_system.PreloadedScene {
         const allocator = self.allocator;
         const preloaded = try allocator.alloc(scene_system.PreloadedScene, scene_configs.len);
+        errdefer {
+            for (preloaded, 0..) |*ps, fi| {
+                if (fi < scene_configs.len) ps.deinit();
+            }
+            allocator.free(preloaded);
+        }
 
         const total_start = window.getTime();
 
@@ -84,13 +90,16 @@ pub const VulkanWorld = struct {
             defer gltf.deinit();
 
             const mesh_ids = try allocator.alloc(u32, gltf.meshes.len);
+            errdefer allocator.free(mesh_ids);
             for (gltf.meshes, 0..) |mesh, mi| {
                 mesh_ids[mi] = try self.registry.mesh_cache.register(mesh.vertices, mesh.indices);
             }
 
             const texture_indices = try allocator.alloc(u32, gltf.materials.len);
+            errdefer allocator.free(texture_indices);
 
             var batch = try renderer.beginUploadBatch(allocator);
+            errdefer batch.cancel();
 
             for (gltf.materials, 0..) |mat, mi| {
                 texture_indices[mi] = try renderer.uploadTextureBatched(&batch, mat.pixels, mat.width, mat.height);
@@ -106,6 +115,7 @@ pub const VulkanWorld = struct {
             const gpu_end = window.getTime();
 
             const primitives = try allocator.dupe(meshLoader.ScenePrimitive, gltf.primitives);
+            errdefer allocator.free(primitives);
 
             preloaded[i] = .{
                 .primitives = primitives,
