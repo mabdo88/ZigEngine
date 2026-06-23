@@ -1,1 +1,0 @@
-{"nodes": [{"id": "camera_system", "label": "CameraSystem", "file_type": "code", "source_file": "src/engine/ecs/systems/camera_system.zig"}], "edges": [], "hyperedges": []}
