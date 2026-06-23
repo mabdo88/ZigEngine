@@ -2,6 +2,8 @@ const std = @import("std");
 const Registry = @import("../entity/registry.zig").Registry;
 const components = @import("../components/components.zig");
 const math = @import("../../math.zig");
+const SystemCreateCtx = @import("system.zig").SystemCreateCtx;
+const shared_state = @import("shared_state.zig");
 
 pub const CameraSystemState = struct {
     aspect: f32 = 1.0,
@@ -24,7 +26,19 @@ pub const CameraSystemState = struct {
 
 pub fn update(registry: *Registry, ctx: *anyopaque, dt: f32) anyerror!void {
     const state: *CameraSystemState = @ptrCast(@alignCast(ctx));
+    state.aspect = shared_state.aspect_ratio;
     try state.update(registry, dt);
+}
+
+pub fn create(ctx: *SystemCreateCtx) anyerror!*anyopaque {
+    const state = try ctx.allocator.create(CameraSystemState);
+    state.* = .{ .aspect = shared_state.aspect_ratio };
+    return @ptrCast(state);
+}
+
+pub fn destroy(allocator: std.mem.Allocator, _: *Registry, ctx: *anyopaque) void {
+    const state: *CameraSystemState = @ptrCast(@alignCast(ctx));
+    allocator.destroy(state);
 }
 
 test "camera system produces view and projection matrices" {

@@ -10,6 +10,7 @@ pub const MeshCache = struct {
     meshes: std.ArrayList(MeshData) = .empty,
     hash_to_id: std.AutoHashMap(u64, u32) = undefined,
     allocator: std.mem.Allocator = undefined,
+    mutex: std.atomic.Mutex = .unlocked,
 
     pub fn init(allocator: std.mem.Allocator) MeshCache {
         return .{
@@ -35,6 +36,9 @@ pub const MeshCache = struct {
     }
 
     pub fn register(self: *MeshCache, vertices: []const components.Vertex, indices: []const u32) !u32 {
+        while (!self.mutex.tryLock()) std.atomic.spinLoopHint();
+        defer self.mutex.unlock();
+
         const hash = hashMesh(vertices, indices);
         if (self.hash_to_id.get(hash)) |id| return id;
 
@@ -47,6 +51,9 @@ pub const MeshCache = struct {
     }
 
     pub fn get(self: *MeshCache, mesh_id: u32) ?MeshData {
+        while (!self.mutex.tryLock()) std.atomic.spinLoopHint();
+        defer self.mutex.unlock();
+
         if (mesh_id >= self.meshes.items.len) return null;
         return self.meshes.items[mesh_id];
     }

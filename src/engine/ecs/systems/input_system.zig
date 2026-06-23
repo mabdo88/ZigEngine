@@ -2,6 +2,8 @@ const std = @import("std");
 const Registry = @import("../entity/registry.zig").Registry;
 const components = @import("../components/components.zig");
 const window = @import("../../../platform/window.zig");
+const SystemCreateCtx = @import("system.zig").SystemCreateCtx;
+const shared_state = @import("shared_state.zig");
 
 pub const InputSystemState = struct {
     win: *window.Window,
@@ -23,6 +25,17 @@ pub const InputSystemState = struct {
 pub fn update(registry: *Registry, ctx: *anyopaque, dt: f32) anyerror!void {
     const state: *InputSystemState = @ptrCast(@alignCast(ctx));
     try state.update(registry, dt);
+}
+
+pub fn create(ctx: *SystemCreateCtx) anyerror!*anyopaque {
+    const state = try ctx.allocator.create(InputSystemState);
+    state.* = .{ .win = shared_state.window_ptr.? };
+    return @ptrCast(state);
+}
+
+pub fn destroy(allocator: std.mem.Allocator, _: *Registry, ctx: *anyopaque) void {
+    const state: *InputSystemState = @ptrCast(@alignCast(ctx));
+    allocator.destroy(state);
 }
 
 pub fn requestScene(registry: *Registry, scene_index: usize) !void {

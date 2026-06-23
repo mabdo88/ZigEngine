@@ -1,6 +1,7 @@
 const std = @import("std");
 const Registry = @import("../entity/registry.zig").Registry;
 const components = @import("../components/components.zig");
+const SystemCreateCtx = @import("system.zig").SystemCreateCtx;
 
 pub const MovementSystemState = struct {
     pub fn update(self: *MovementSystemState, registry: *Registry, dt: f32) anyerror!void {
@@ -24,6 +25,17 @@ pub const MovementSystemState = struct {
 pub fn update(registry: *Registry, ctx: *anyopaque, dt: f32) anyerror!void {
     const state: *MovementSystemState = @ptrCast(@alignCast(ctx));
     try state.update(registry, dt);
+}
+
+pub fn create(ctx: *SystemCreateCtx) anyerror!*anyopaque {
+    const state = try ctx.allocator.create(MovementSystemState);
+    state.* = .{};
+    return @ptrCast(state);
+}
+
+pub fn destroy(allocator: std.mem.Allocator, _: *Registry, ctx: *anyopaque) void {
+    const state: *MovementSystemState = @ptrCast(@alignCast(ctx));
+    allocator.destroy(state);
 }
 
 test "movement rotates owned entities when scene.rotates is true" {
