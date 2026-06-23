@@ -42,8 +42,7 @@ pub fn uploadTextureBatched(ctx: *zvkw.VulkanContext, batch: *upload.UploadBatch
         .flags = zvkw.vma.VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
         .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
     };
-    try check(zvkw.vma.vmaCreateImage(ctx.vmaAllocator, @ptrCast(&imageCI), &imageAllocCI,
-        @ptrCast(&ctx.textureSlots[slot].image), &ctx.textureSlots[slot].allocation, null));
+    try check(zvkw.vma.vmaCreateImage(ctx.vmaAllocator, @ptrCast(&imageCI), &imageAllocCI, @ptrCast(&ctx.textureSlots[slot].image), &ctx.textureSlots[slot].allocation, null));
 
     try batch.uploadImage(pixels, width, height, ctx.textureSlots[slot].image);
 
@@ -54,8 +53,10 @@ pub fn uploadTextureBatched(ctx: *zvkw.VulkanContext, batch: *upload.UploadBatch
         .format = zvkw.zvk.VK_FORMAT_R8G8B8A8_SRGB,
         .subresourceRange = .{
             .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0, .levelCount = 1,
-            .baseArrayLayer = 0, .layerCount = 1,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
         },
     };
     try check(zvkw.zvk.vkCreateImageView(ctx.m_Device, &viewCI, null, &ctx.textureSlots[slot].view));
@@ -119,8 +120,10 @@ pub fn uploadTexture(ctx: *zvkw.VulkanContext, pixels: []const u8, width: u32, h
         .image = ctx.textureSlots[slot].image,
         .subresourceRange = .{
             .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0, .levelCount = 1,
-            .baseArrayLayer = 0, .layerCount = 1,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
         },
     };
     const toTransferDep = zvkw.zvk.VkDependencyInfo{
@@ -154,8 +157,10 @@ pub fn uploadTexture(ctx: *zvkw.VulkanContext, pixels: []const u8, width: u32, h
         .image = ctx.textureSlots[slot].image,
         .subresourceRange = .{
             .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0, .levelCount = 1,
-            .baseArrayLayer = 0, .layerCount = 1,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
         },
     };
     const toShaderDep = zvkw.zvk.VkDependencyInfo{
@@ -180,8 +185,10 @@ pub fn uploadTexture(ctx: *zvkw.VulkanContext, pixels: []const u8, width: u32, h
         .format = zvkw.zvk.VK_FORMAT_R8G8B8A8_SRGB,
         .subresourceRange = .{
             .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0, .levelCount = 1,
-            .baseArrayLayer = 0, .layerCount = 1,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
         },
     };
     try check(zvkw.zvk.vkCreateImageView(ctx.m_Device, &viewCI, null, &ctx.textureSlots[slot].view));

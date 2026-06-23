@@ -24,23 +24,17 @@ pub const AllComponents = .{
     SceneComponent,
     SceneActiveTag,
     ScenePendingTag,
+    SceneLoadingTag,
     SceneOwnedComponent,
     CameraMatricesComponent,
     TextureDataComponent,
 };
 
 pub const MeshComponent = struct {
-    vertices: []const Vertex,
-    indices: []const u32,
-    owns_memory: bool = false,
+    mesh_id: u32,
 
-    pub fn isValid(self: MeshComponent) bool {
-        return self.vertices.len > 0 and self.indices.len > 0;
-    }
-    pub fn deinit(self: MeshComponent, allocator: std.mem.Allocator) void {
-        if (!self.owns_memory) return;
-        allocator.free(self.vertices);
-        allocator.free(self.indices);
+    pub fn isValid(_: MeshComponent) bool {
+        return true;
     }
 };
 
@@ -76,6 +70,7 @@ pub const TextureComponent = struct {
 pub const SceneComponent = struct {
     name: []const u8,
     path: [:0]const u8,
+    index: u32 = 0,
     camera_position: @Vector(3, f32) = .{ 0.0, 0.5, 3.0 },
     camera_target: @Vector(3, f32) = .{ 0.0, 0.5, 0.0 },
     offset: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 },
@@ -85,6 +80,8 @@ pub const SceneComponent = struct {
 pub const SceneActiveTag = struct {};
 
 pub const ScenePendingTag = struct {};
+
+pub const SceneLoadingTag = struct {};
 
 pub const SceneOwnedComponent = struct {
     owner: Entity,

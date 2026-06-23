@@ -3,6 +3,7 @@ const Entity = @import("entity.zig").Entity;
 const compstrg = @import("componentStorage.zig");
 const components = @import("../components/components.zig");
 const event = @import("../event.zig");
+const meshCache = @import("../../../resources/meshCache.zig");
 
 fn StorageType() type {
     var types: [components.AllComponents.len]type = undefined;
@@ -20,6 +21,7 @@ pub const Registry = struct {
     MAX_ENTITIES: u32 = 0,
     storage: StorageType() = undefined,
     events: event.EventBus = undefined,
+    mesh_cache: meshCache.MeshCache = undefined,
 
     pub fn init(allocator: std.mem.Allocator) Registry {
         std.log.info("Initializing Registry", .{});
@@ -27,6 +29,7 @@ pub const Registry = struct {
         self.registry_allocator = allocator;
         self.MAX_ENTITIES = 1_000_000;
         self.events = event.EventBus.init(allocator);
+        self.mesh_cache = meshCache.MeshCache.init(allocator);
         inline for (0..self.storage.len) |i| {
             self.storage[i] = .{};
         }
@@ -51,6 +54,7 @@ pub const Registry = struct {
         self.generations.deinit(self.registry_allocator);
         self.component_masks.deinit(self.registry_allocator);
         self.events.deinit();
+        self.mesh_cache.deinit();
 
         std.log.info("Registry Offline", .{});
     }
@@ -76,10 +80,8 @@ pub const Registry = struct {
     }
 
     pub fn destroyEntity(self: *Registry, entity: Entity) !void {
+        if (!self.isAlive(entity)) return error.EntityIsDead;
         const index = entity.index;
-        if (index >= self.generations.items.len) {
-            return error.InvalidEntityIndex;
-        }
         self.events.emit(.{ .entity_destroyed = entity });
         if (self.generations.items[index] == std.math.maxInt(u32)) {
             self.generations.items[index] += 1;
@@ -118,10 +120,20 @@ pub const Registry = struct {
         return self.attach(entity, component);
     }
     pub fn set(self: *Registry, entity: Entity, component: anytype) !void {
-        return self.attach(entity, component);
+        if (!self.isAlive(entity)) return error.EntityIsDead;
+        const T = @TypeOf(component);
+        const idx = comptime components.ComponentIndex(T);
+        if (@hasDecl(T, "deinit")) {
+            if (self.storage[idx].get(entity)) |old| {
+                old.deinit(self.registry_allocator);
+            }
+        }
+        try self.storage[idx].attachComponent(self.registry_allocator, entity, component);
+        const bit: u64 = comptime components.ComponentBit(T);
+        self.component_masks.items[entity.index] |= bit;
     }
     pub fn remove(self: *Registry, comptime T: type, entity: Entity) void {
-        if (entity.index >= self.component_masks.items.len) return;
+        if (!self.isAlive(entity)) return;
         const idx = comptime components.ComponentIndex(T);
         if (@hasDecl(T, "deinit")) {
             if (self.storage[idx].get(entity)) |component| {
@@ -137,19 +149,29 @@ pub const Registry = struct {
             registry: *Registry,
             current: usize = 0,
             mask: u64 = undefined,
+            primary_entities: []u32 = &.{},
 
             pub fn init(registry: *Registry) @This() {
                 var mask: u64 = 0;
                 inline for (Types) |T| {
                     mask |= comptime components.ComponentBit(T);
                 }
-                return .{ .registry = registry, .mask = mask };
+                var primary_entities: []u32 = &.{};
+                var best_len: usize = std.math.maxInt(usize);
+                inline for (Types, 0..) |T, i| {
+                    _ = i;
+                    const storage = &registry.storage[components.ComponentIndex(T)];
+                    if (storage.dense.items.len < best_len) {
+                        best_len = storage.dense.items.len;
+                        primary_entities = storage.entities.items;
+                    }
+                }
+                return .{ .registry = registry, .mask = mask, .primary_entities = primary_entities };
             }
 
             pub fn next(self: *@This()) ?Entity {
-                const primary = &self.registry.storage[components.ComponentIndex(Types[0])];
-                while (self.current < primary.dense.items.len) {
-                    const entity_id = primary.entities.items[self.current];
+                while (self.current < self.primary_entities.len) {
+                    const entity_id = self.primary_entities[self.current];
                     self.current += 1;
                     if (entity_id < self.registry.component_masks.items.len) {
                         const entity_mask = self.registry.component_masks.items[entity_id];
@@ -166,6 +188,7 @@ pub const Registry = struct {
         return QueryIterator(Types).init(self);
     }
     pub fn get(self: *Registry, comptime T: type, entity: Entity) ?*T {
+        if (!self.isAlive(entity)) return null;
         return self.storage[components.ComponentIndex(T)].getByIndex(entity.index);
     }
 };
@@ -181,12 +204,13 @@ test "attach and get component" {
         .{ .pos = .{ -0.5, 0.5, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 1.0 } },
     };
     const idx = [_]u32{ 0, 1, 2 };
+    const mesh_id = try reg.mesh_cache.register(&verts, &idx);
 
-    try reg.add(entity, components.MeshComponent{ .vertices = &verts, .indices = &idx });
+    try reg.add(entity, components.MeshComponent{ .mesh_id = mesh_id });
     try std.testing.expect(reg.get(components.MeshComponent, entity) != null);
 
     const mesh = reg.get(components.MeshComponent, entity).?;
-    try std.testing.expectEqual(@as(usize, 3), mesh.vertices.len);
+    try std.testing.expectEqual(mesh_id, mesh.mesh_id);
 }
 
 test "attach and destroy cleans storage" {
@@ -194,12 +218,13 @@ test "attach and destroy cleans storage" {
     defer reg.deinit();
 
     const entity = try reg.create();
-    const verts = try std.testing.allocator.alloc(components.Vertex, 1);
-    verts[0] = .{ .pos = .{ 0.0, 0.0, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 0.0 } };
-    const idx = try std.testing.allocator.alloc(u32, 1);
-    idx[0] = 0;
+    const verts = [_]components.Vertex{
+        .{ .pos = .{ 0.0, 0.0, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 0.0 } },
+    };
+    const idx = [_]u32{0};
+    const mesh_id = try reg.mesh_cache.register(&verts, &idx);
 
-    try reg.add(entity, components.MeshComponent{ .vertices = verts, .indices = idx, .owns_memory = true });
+    try reg.add(entity, components.MeshComponent{ .mesh_id = mesh_id });
     try std.testing.expect(reg.get(components.MeshComponent, entity) != null);
 
     try reg.destroyEntity(entity);
@@ -264,15 +289,16 @@ test "query entities with mesh and transform" {
         .{ .pos = .{ 0.0, 0.0, 0.0 }, .normal = .{ 0.0, 0.0, 1.0 }, .uv = .{ 0.0, 0.0 } },
     };
     const idx = [_]u32{0};
+    const mesh_id = try reg.mesh_cache.register(&verts, &idx);
 
-    try reg.add(entity1, components.MeshComponent{ .vertices = &verts, .indices = &idx });
+    try reg.add(entity1, components.MeshComponent{ .mesh_id = mesh_id });
     try reg.add(entity1, components.TransformComponent{
         .position = .{ 1.0, 0.0, 0.0 },
         .rotation = .{ 0.0, 0.0, 0.0 },
         .scale = .{ 1.0, 1.0, 1.0 },
     });
 
-    try reg.add(entity2, components.MeshComponent{ .vertices = &verts, .indices = &idx });
+    try reg.add(entity2, components.MeshComponent{ .mesh_id = mesh_id });
 
     var it = reg.Query(.{ components.MeshComponent, components.TransformComponent });
     var count: u32 = 0;
@@ -295,6 +321,36 @@ test "entity recycling increments generation" {
     try std.testing.expectEqual(e1.index, e2.index);
     try std.testing.expect(e1.generation < e2.generation);
     try std.testing.expect(!reg.isAlive(e1));
+    try std.testing.expect(reg.isAlive(e2));
+}
+
+test "stale handle cannot access or destroy recycled entity" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const e1 = try reg.create();
+    try reg.add(e1, components.TransformComponent{
+        .position = .{ 1.0, 2.0, 3.0 },
+        .rotation = .{ 0.0, 0.0, 0.0 },
+        .scale = .{ 1.0, 1.0, 1.0 },
+    });
+    try reg.destroyEntity(e1);
+
+    // Recycle the index — e2 has the same index but a new generation.
+    const e2 = try reg.create();
+    try std.testing.expectEqual(e1.index, e2.index);
+    try std.testing.expect(reg.isAlive(e2));
+
+    // Stale handle e1 must not see e2's (empty) components.
+    try std.testing.expect(reg.get(components.TransformComponent, e1) == null);
+
+    // Stale handle e1 must not destroy e2.
+    const result = reg.destroyEntity(e1);
+    try std.testing.expectError(error.EntityIsDead, result);
+    try std.testing.expect(reg.isAlive(e2));
+
+    // Stale handle e1 must not remove components from e2.
+    reg.remove(components.TransformComponent, e1);
     try std.testing.expect(reg.isAlive(e2));
 }
 
@@ -398,6 +454,32 @@ test "overwrite component via set" {
     try std.testing.expectApproxEqAbs(@as(f32, 9.0), transform.position[0], 1e-5);
     try std.testing.expectApproxEqAbs(@as(f32, 8.0), transform.position[1], 1e-5);
     try std.testing.expectApproxEqAbs(@as(f32, 7.0), transform.position[2], 1e-5);
+}
+
+test "set deinit old owned component before overwrite" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    const entity = try reg.create();
+    const pixels1 = try std.testing.allocator.alloc(u8, 4);
+    pixels1[0] = 255;
+    pixels1[1] = 0;
+    pixels1[2] = 0;
+    pixels1[3] = 255;
+
+    try reg.add(entity, components.TextureDataComponent{ .material_id = 1, .pixels = pixels1, .width = 1, .height = 1 });
+
+    const pixels2 = try std.testing.allocator.alloc(u8, 4);
+    pixels2[0] = 0;
+    pixels2[1] = 255;
+    pixels2[2] = 0;
+    pixels2[3] = 255;
+
+    // set should deinit the old TextureDataComponent (freeing pixels1) before overwriting.
+    try reg.set(entity, components.TextureDataComponent{ .material_id = 1, .pixels = pixels2, .width = 1, .height = 1 });
+
+    const td = reg.get(components.TextureDataComponent, entity).?;
+    try std.testing.expectEqual(@as(u8, 0), td.pixels[0]);
 }
 
 test "query returns empty when no entities match" {

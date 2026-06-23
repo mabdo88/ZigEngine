@@ -29,7 +29,6 @@ pub const RenderSystemState = struct {
     pub fn onSceneUnloaded(ctx: *anyopaque, payload: event.EventPayload) void {
         _ = payload;
         const self: *RenderSystemState = @ptrCast(@alignCast(ctx));
-        renderer.resetTextures();
         self.texture_cache.clearRetainingCapacity();
     }
 
@@ -66,22 +65,23 @@ pub const RenderSystemState = struct {
             const td = registry.get(components.TextureDataComponent, entity).?;
 
             var index: u32 = 0;
+            var resolved = false;
             if (self.texture_cache.get(td.material_id)) |cached| {
                 index = cached;
+                resolved = true;
             } else if (td.pixels.len > 0) {
                 index = try renderer.uploadTexture(td.pixels, td.width, td.height);
                 try self.texture_cache.put(td.material_id, index);
-            } else {
-                index = 0;
-            }
-
-            try registry.set(entity, components.TextureComponent{ .textureIndex = index });
-
-            if (td.pixels.len > 0) {
+                resolved = true;
                 self.allocator.free(td.pixels);
                 td.pixels = &.{};
                 td.width = 0;
                 td.height = 0;
+            }
+
+            if (resolved) {
+                try registry.set(entity, components.TextureComponent{ .textureIndex = index });
+                registry.remove(components.TextureDataComponent, entity);
             }
         }
     }

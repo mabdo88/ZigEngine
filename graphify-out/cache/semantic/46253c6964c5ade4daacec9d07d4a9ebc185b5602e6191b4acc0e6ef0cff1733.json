@@ -1,0 +1,1 @@
+{"nodes": [{"id": "vulkan_pipeline", "label": "Vulkan Pipeline", "file_type": "code", "source_file": "src/renderer/pipeline.zig"}], "edges": [], "hyperedges": []}

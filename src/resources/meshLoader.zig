@@ -26,12 +26,15 @@ pub const NodeView = struct {
         const rq = if (node.has_rotation != 0) node.rotation else [4]f32{ 0, 0, 0, 1 };
         const sc = if (node.has_scale != 0) node.scale else [3]f32{ 1, 1, 1 };
 
-        const x = rq[0]; const y = rq[1]; const z = rq[2]; const w = rq[3];
+        const x = rq[0];
+        const y = rq[1];
+        const z = rq[2];
+        const w = rq[3];
         const rot: [4][4]f32 = .{
-            .{ 1 - 2*(y*y + z*z),   2*(x*y + w*z),     2*(x*z - w*y), 0 },
-            .{   2*(x*y - w*z), 1 - 2*(x*x + z*z),     2*(y*z + w*x), 0 },
-            .{   2*(x*z + w*y),     2*(y*z - w*x), 1 - 2*(x*x + y*y), 0 },
-            .{               0,                 0,                   0, 1 },
+            .{ 1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y), 0 },
+            .{ 2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x), 0 },
+            .{ 2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y), 0 },
+            .{ 0, 0, 0, 1 },
         };
 
         var m = rot;
@@ -205,11 +208,17 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
                 } else {
                     std.log.warn("loadgltf: stbi failed to load '{s}', using white fallback", .{img_path});
                     pixels = try allocator.alloc(u8, 4);
-                    pixels[0] = 255; pixels[1] = 255; pixels[2] = 255; pixels[3] = 255;
+                    pixels[0] = 255;
+                    pixels[1] = 255;
+                    pixels[2] = 255;
+                    pixels[3] = 255;
                 }
             } else {
                 pixels = try allocator.alloc(u8, 4);
-                pixels[0] = 255; pixels[1] = 255; pixels[2] = 255; pixels[3] = 255;
+                pixels[0] = 255;
+                pixels[1] = 255;
+                pixels[2] = 255;
+                pixels[3] = 255;
             }
 
             const mat_idx: u32 = @intCast(mat_list.items.len);

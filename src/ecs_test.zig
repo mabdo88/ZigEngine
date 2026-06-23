@@ -12,4 +12,6 @@ comptime {
     _ = @import("engine/ecs/systems/input_system.zig");
     // Math
     _ = @import("engine/math.zig");
+    // Resources
+    _ = @import("resources/meshCache.zig");
 }

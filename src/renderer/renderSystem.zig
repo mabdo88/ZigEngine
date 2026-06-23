@@ -6,6 +6,7 @@ const Entity = @import("../engine/ecs/entity/entity.zig").Entity;
 const upload = @import("upload.zig");
 const math = @import("../engine/math.zig");
 const event = @import("../engine/ecs/event.zig");
+const meshCache = @import("../resources/meshCache.zig");
 
 fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
@@ -20,13 +21,8 @@ pub const GpuMesh = struct {
     refcount: u32 = 1,
 };
 
-const MeshKey = struct {
-    vertexBuffer: zvkw.zvk.VkBuffer,
-    indexBuffer: zvkw.zvk.VkBuffer,
-};
-
-fn uploadMesh(allocator: std.mem.Allocator, mesh: *const components.MeshComponent) !*GpuMesh {
-    var batch = try upload.UploadBatch.begin(&zvkw.ctx, allocator);
+fn uploadMesh(ctx: *zvkw.VulkanContext, allocator: std.mem.Allocator, mesh: meshCache.MeshData) !*GpuMesh {
+    var batch = try upload.UploadBatch.begin(ctx, allocator);
     var gpuMesh = try allocator.create(GpuMesh);
     errdefer allocator.destroy(gpuMesh);
     try batch.uploadBuffer(
@@ -49,7 +45,7 @@ fn uploadMesh(allocator: std.mem.Allocator, mesh: *const components.MeshComponen
     return gpuMesh;
 }
 
-pub fn recordMeshUpload(batch: *upload.UploadBatch, mesh: *const components.MeshComponent, out: *GpuMesh) !void {
+pub fn recordMeshUpload(batch: *upload.UploadBatch, mesh: meshCache.MeshData, out: *GpuMesh) !void {
     try batch.uploadBuffer(
         mesh.vertices.ptr,
         @sizeOf(components.Vertex) * mesh.vertices.len,
@@ -68,86 +64,97 @@ pub fn recordMeshUpload(batch: *upload.UploadBatch, mesh: *const components.Mesh
 }
 
 pub const RenderSystem = struct {
+    ctx: *zvkw.VulkanContext,
     allocator: std.mem.Allocator,
-    gpu_meshes: std.AutoHashMap(Entity, *GpuMesh),
-    shared_meshes: std.AutoHashMap(MeshKey, *GpuMesh),
+    gpu_meshes: std.AutoHashMap(u32, *GpuMesh),
+    entity_meshes: std.AutoHashMap(Entity, u32),
 
-    pub fn init(allocator: std.mem.Allocator) RenderSystem {
+    pub fn preloadMeshBatched(self: *RenderSystem, batch: *upload.UploadBatch, mesh_id: u32, mesh_data: meshCache.MeshData) !void {
+        if (self.gpu_meshes.contains(mesh_id)) return;
+        const gpu_mesh = try self.allocator.create(GpuMesh);
+        try recordMeshUpload(batch, mesh_data, gpu_mesh);
+        gpu_mesh.refcount = 1;
+        try self.gpu_meshes.put(mesh_id, gpu_mesh);
+    }
+
+    pub fn init(ctx: *zvkw.VulkanContext, allocator: std.mem.Allocator) RenderSystem {
         return .{
+            .ctx = ctx,
             .allocator = allocator,
-            .gpu_meshes = std.AutoHashMap(Entity, *GpuMesh).init(allocator),
-            .shared_meshes = std.AutoHashMap(MeshKey, *GpuMesh).init(allocator),
+            .gpu_meshes = std.AutoHashMap(u32, *GpuMesh).init(allocator),
+            .entity_meshes = std.AutoHashMap(Entity, u32).init(allocator),
         };
     }
 
-    pub fn initCapacity(allocator: std.mem.Allocator, mesh_capacity: u32, shared_capacity: u32) !RenderSystem {
-        var self = RenderSystem.init(allocator);
+    pub fn initCapacity(ctx: *zvkw.VulkanContext, allocator: std.mem.Allocator, mesh_capacity: u32, shared_capacity: u32) !RenderSystem {
+        var self = RenderSystem.init(ctx, allocator);
         try self.gpu_meshes.ensureTotalCapacity(mesh_capacity);
-        try self.shared_meshes.ensureTotalCapacity(shared_capacity);
+        try self.entity_meshes.ensureTotalCapacity(shared_capacity);
         return self;
     }
 
     pub fn onEntityDestroyed(ctx: *anyopaque, payload: event.EventPayload) void {
         const self: *RenderSystem = @ptrCast(@alignCast(ctx));
         const entity = payload.entity_destroyed;
-        if (self.gpu_meshes.fetchRemove(entity)) |kv| {
-            const shared = kv.value;
-            shared.refcount -= 1;
-            if (shared.refcount == 0) {
-                _ = self.shared_meshes.remove(.{
-                    .vertexBuffer = shared.vertexBuffer,
-                    .indexBuffer = shared.indexBuffer,
-                });
-                zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(shared.vertexBuffer), shared.vertexAllocation);
-                zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(shared.indexBuffer), shared.indexAllocation);
-                self.allocator.destroy(shared);
+        if (self.entity_meshes.fetchRemove(entity)) |kv| {
+            const mesh_id = kv.value;
+            if (self.gpu_meshes.get(mesh_id)) |gpu_mesh| {
+                gpu_mesh.refcount -= 1;
+                if (gpu_mesh.refcount == 0) {
+                    _ = self.gpu_meshes.remove(mesh_id);
+                    zvkw.vma.vmaDestroyBuffer(self.ctx.vmaAllocator, @ptrCast(gpu_mesh.vertexBuffer), gpu_mesh.vertexAllocation);
+                    zvkw.vma.vmaDestroyBuffer(self.ctx.vmaAllocator, @ptrCast(gpu_mesh.indexBuffer), gpu_mesh.indexAllocation);
+                    self.allocator.destroy(gpu_mesh);
+                }
             }
         }
     }
 
-    pub fn attachMesh(self: *RenderSystem, entity: Entity, gpu_mesh: *GpuMesh) !void {
-        if (self.gpu_meshes.fetchRemove(entity)) |kv| {
-            const old = kv.value;
-            old.refcount -= 1;
-            if (old.refcount == 0) {
-                _ = self.shared_meshes.remove(.{
-                    .vertexBuffer = old.vertexBuffer,
-                    .indexBuffer = old.indexBuffer,
-                });
-                zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(old.vertexBuffer), old.vertexAllocation);
-                zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(old.indexBuffer), old.indexAllocation);
-                self.allocator.destroy(old);
+    pub fn attachMesh(self: *RenderSystem, entity: Entity, mesh_id: u32, gpu_mesh: *GpuMesh) !void {
+        if (self.entity_meshes.fetchRemove(entity)) |kv| {
+            const old_mesh_id = kv.value;
+            if (self.gpu_meshes.get(old_mesh_id)) |old| {
+                old.refcount -= 1;
+                if (old.refcount == 0) {
+                    _ = self.gpu_meshes.remove(old_mesh_id);
+                    zvkw.vma.vmaDestroyBuffer(self.ctx.vmaAllocator, @ptrCast(old.vertexBuffer), old.vertexAllocation);
+                    zvkw.vma.vmaDestroyBuffer(self.ctx.vmaAllocator, @ptrCast(old.indexBuffer), old.indexAllocation);
+                    self.allocator.destroy(old);
+                }
             }
         }
 
-        const key = MeshKey{
-            .vertexBuffer = gpu_mesh.vertexBuffer,
-            .indexBuffer = gpu_mesh.indexBuffer,
-        };
-        if (self.shared_meshes.get(key)) |shared| {
+        if (self.gpu_meshes.get(mesh_id)) |shared| {
             shared.refcount += 1;
-            try self.gpu_meshes.put(entity, shared);
+            try self.entity_meshes.put(entity, mesh_id);
             self.allocator.destroy(gpu_mesh);
             return;
         }
 
         gpu_mesh.refcount = 1;
-        try self.shared_meshes.put(key, gpu_mesh);
-        try self.gpu_meshes.put(entity, gpu_mesh);
+        try self.gpu_meshes.put(mesh_id, gpu_mesh);
+        try self.entity_meshes.put(entity, mesh_id);
     }
 
     pub fn update(self: *RenderSystem, registry: *Registry, cb: zvkw.zvk.VkCommandBuffer, dt: f32) !void {
         _ = dt;
-        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipelineLayout, 0, 1, &zvkw.ctx.uboDescriptorSets[zvkw.ctx.frameIndex], 0, null);
-        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipelineLayout, 1, 1, &zvkw.ctx.bindlessDescriptorSet, 0, null);
+        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, self.ctx.pipelineLayout, 0, 1, &self.ctx.uboDescriptorSets[self.ctx.frameIndex], 0, null);
+        zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, self.ctx.pipelineLayout, 1, 1, &self.ctx.bindlessDescriptorSet, 0, null);
         var it = registry.Query(.{components.MeshComponent});
         while (it.next()) |entity| {
             const mesh = registry.get(components.MeshComponent, entity).?;
             if (!mesh.isValid()) continue;
-            if (!self.gpu_meshes.contains(entity)) {
-                const gpu_mesh = try uploadMesh(self.allocator, mesh);
-                try self.attachMesh(entity, gpu_mesh);
-                std.log.info("RenderSystem: uploaded mesh for entity {}", .{entity.index});
+            const mesh_id = mesh.mesh_id;
+            if (!self.entity_meshes.contains(entity)) {
+                if (self.gpu_meshes.get(mesh_id)) |shared| {
+                    shared.refcount += 1;
+                    try self.entity_meshes.put(entity, mesh_id);
+                } else {
+                    const mesh_data = registry.mesh_cache.get(mesh_id) orelse continue;
+                    const gpu_mesh = try uploadMesh(self.ctx, self.allocator, mesh_data);
+                    try self.attachMesh(entity, mesh_id, gpu_mesh);
+                    std.log.info("RenderSystem: uploaded mesh_id {d} for entity {}", .{ mesh_id, entity.index });
+                }
             }
 
             const model_matrix = blk: {
@@ -156,7 +163,7 @@ pub const RenderSystem = struct {
                 break :blk math.matMul(world, local);
             };
 
-            const gpu_mesh = self.gpu_meshes.get(entity).?;
+            const gpu_mesh = self.gpu_meshes.get(mesh_id).?;
             const offset: zvkw.zvk.VkDeviceSize = 0;
             zvkw.zvk.vkCmdBindVertexBuffers(cb, 0, 1, &gpu_mesh.vertexBuffer, &offset);
             zvkw.zvk.vkCmdBindIndexBuffer(cb, gpu_mesh.indexBuffer, 0, zvkw.zvk.VK_INDEX_TYPE_UINT32);
@@ -165,20 +172,20 @@ pub const RenderSystem = struct {
                 .textureIndex = if (registry.get(components.TextureComponent, entity)) |tc| tc.textureIndex else 0,
             };
 
-            zvkw.zvk.vkCmdPushConstants(cb, zvkw.ctx.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.PushConstants), @ptrCast(&pc));
+            zvkw.zvk.vkCmdPushConstants(cb, self.ctx.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.PushConstants), @ptrCast(&pc));
             zvkw.zvk.vkCmdDrawIndexed(cb, gpu_mesh.indexCount, 1, 0, 0, 0);
         }
     }
 
     pub fn deinit(self: *RenderSystem) void {
-        var it = self.shared_meshes.valueIterator();
-        while (it.next()) |shared_ptr| {
-            const shared = shared_ptr.*;
-            zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(shared.vertexBuffer), shared.vertexAllocation);
-            zvkw.vma.vmaDestroyBuffer(zvkw.ctx.vmaAllocator, @ptrCast(shared.indexBuffer), shared.indexAllocation);
-            self.allocator.destroy(shared);
+        var it = self.gpu_meshes.valueIterator();
+        while (it.next()) |gpu_mesh_ptr| {
+            const gpu_mesh = gpu_mesh_ptr.*;
+            zvkw.vma.vmaDestroyBuffer(self.ctx.vmaAllocator, @ptrCast(gpu_mesh.vertexBuffer), gpu_mesh.vertexAllocation);
+            zvkw.vma.vmaDestroyBuffer(self.ctx.vmaAllocator, @ptrCast(gpu_mesh.indexBuffer), gpu_mesh.indexAllocation);
+            self.allocator.destroy(gpu_mesh);
         }
         self.gpu_meshes.deinit();
-        self.shared_meshes.deinit();
+        self.entity_meshes.deinit();
     }
 };

@@ -17,7 +17,7 @@ fn check(result: zvkw.zvk.VkResult) !void {
 
 pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry, render_system: *rs) !void {
     zvkw.ctx.zallocator = zig_allocator;
-    render_system.* = try rs.initCapacity(zig_allocator, 256, 64);
+    render_system.* = try rs.initCapacity(&zvkw.ctx, zig_allocator, 256, 64);
     try zvkw.win.init();
     zvkw.ctx.m_window = try zvkw.win.create(title.?, WWidth, WHeight, true);
     zvkw.ctx.extensions = try zvkw.win.requiredInstanceExtensions(zig_allocator);
@@ -271,6 +271,12 @@ pub fn render(matrices: math.CameraMatrices, reg: *rgstry.Registry, render_syste
         return error.PresentImageFailed;
     }
     zvkw.ctx.frameIndex = (zvkw.ctx.frameIndex + 1) % zvkw.max_frames_in_flight;
+}
+
+pub const UploadBatch = upload.UploadBatch;
+
+pub fn beginUploadBatch(allocator: std.mem.Allocator) !UploadBatch {
+    return upload.UploadBatch.begin(&zvkw.ctx, allocator);
 }
 
 pub fn uploadTextureBatched(batch: *upload.UploadBatch, pixels: []const u8, width: u32, height: u32) !zvkw.TextureHandle {

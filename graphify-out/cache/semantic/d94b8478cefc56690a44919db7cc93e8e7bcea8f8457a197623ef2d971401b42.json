@@ -1,0 +1,1 @@
+{"nodes": [{"id": "render_system", "label": "RenderSystem", "file_type": "code", "source_file": "src/engine/ecs/systems/render_system.zig"}], "edges": [], "hyperedges": []}

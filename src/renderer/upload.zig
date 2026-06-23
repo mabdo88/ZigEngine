@@ -173,7 +173,13 @@ pub const UploadBatch = struct {
             self.cmd,
             zvkw.zvk.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             zvkw.zvk.VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, null, 0, null, 1, &barrier_to_dst,
+            0,
+            0,
+            null,
+            0,
+            null,
+            1,
+            &barrier_to_dst,
         );
 
         const region = zvkw.zvk.VkBufferImageCopy{
@@ -190,8 +196,12 @@ pub const UploadBatch = struct {
             .imageExtent = .{ .width = width, .height = height, .depth = 1 },
         };
         zvkw.zvk.vkCmdCopyBufferToImage(
-            self.cmd, @ptrCast(staging.buffer), image,
-            zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+            self.cmd,
+            @ptrCast(staging.buffer),
+            image,
+            zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &region,
         );
 
         const barrier_to_read = zvkw.zvk.VkImageMemoryBarrier{
@@ -215,7 +225,13 @@ pub const UploadBatch = struct {
             self.cmd,
             zvkw.zvk.VK_PIPELINE_STAGE_TRANSFER_BIT,
             zvkw.zvk.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, null, 0, null, 1, &barrier_to_read,
+            0,
+            0,
+            null,
+            0,
+            null,
+            1,
+            &barrier_to_read,
         );
     }
 
