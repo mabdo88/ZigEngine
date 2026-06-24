@@ -56,6 +56,36 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addIncludePath(b.path("deps/cgltf/"));
     exe.root_module.addIncludePath(b.path("deps/stb/"));
     exe.root_module.addIncludePath(b.path("deps/vma/"));
+
+    // Flecs: translate the C header at build time (replaces @cImport).
+    const flecs_translate = b.addTranslateC(.{
+        .root_source_file = b.path("deps/flecs/flecs.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    flecs_translate.addIncludePath(b.path("deps/flecs/"));
+    const flecs_module = flecs_translate.createModule();
+
+    // Flecs: compile flecs.c as a separate optimized static library.
+    // Zig debug-mode runtime safety checks intercept C code and cause a
+    // null-pointer panic in flecs_bootstrap during ecs_init.
+    const flecs_lib = b.addLibrary(.{
+        .name = "flecs",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .root_source_file = null,
+            .target = target,
+            .optimize = .ReleaseFast,
+            .link_libc = true,
+        }),
+    });
+    flecs_lib.root_module.addCSourceFile(.{
+        .file = b.path("deps/flecs/flecs.c"),
+        .flags = &[_][]const u8{"-DFLECS_NDEBUG"},
+    });
+    flecs_lib.root_module.addIncludePath(b.path("deps/flecs/"));
+    b.installArtifact(flecs_lib);
+    exe.root_module.linkLibrary(flecs_lib);
     if (os_tag == .windows) {
         // Windows: vendored Vulkan SDK headers + Win32 + the Windows loader (vulkan-1).
         const vulkan_include = b.fmt("{s}/Include/", .{vulkan_sdk_path});
@@ -67,6 +97,8 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("user32", .{});
         exe.root_module.linkSystemLibrary("shell32", .{});
         exe.root_module.linkSystemLibrary("vulkan-1", .{});
+        exe.root_module.linkSystemLibrary("dbghelp", .{});
+        exe.root_module.linkSystemLibrary("ws2_32", .{});
         // glfw3.lib is an import library; ship glfw3.dll next to the exe.
         const install_glfw_dll = b.addInstallBinFile(b.path("deps/glfw/lib/glfw3.dll"), "glfw3.dll");
         b.getInstallStep().dependOn(&install_glfw_dll.step);
@@ -96,6 +128,10 @@ pub fn build(b: *std.Build) void {
     mod.addImport("vmaimport", vma_module);
     exe.root_module.addImport("vmaimport", vma_module);
 
+    // Flecs translated C module — import into both mod and exe
+    mod.addImport("flecs_c", flecs_module);
+    exe.root_module.addImport("flecs_c", flecs_module);
+
     // Run step
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);
@@ -119,18 +155,42 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     // ECS tests - GPU-free, minimal module
-    // Use zig test directly to avoid --listen flag issues
-    const ecs_test_cmd = b.addSystemCommand(&.{
-        b.graph.zig_exe,
-        "test",
-        "src/ecs_test.zig",
-        "-ODebug",
-        "--cache-dir",
-        ".zig-cache",
-        "--global-cache-dir",
-        b.graph.global_cache_root.path orelse "",
+    const ecs_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/ecs_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "flecs_c", .module = flecs_module },
+        },
     });
+    const ecs_tests = b.addTest(.{ .root_module = ecs_test_mod });
+    ecs_tests.root_module.linkLibrary(flecs_lib);
+    if (os_tag == .windows) {
+        ecs_tests.root_module.linkSystemLibrary("dbghelp", .{});
+        ecs_tests.root_module.linkSystemLibrary("ws2_32", .{});
+    }
+    const run_ecs_tests = b.addRunArtifact(ecs_tests);
     const ecs_test_step = b.step("test-ecs", "Run ECS tests");
-    ecs_test_step.dependOn(&ecs_test_cmd.step);
-    test_step.dependOn(&ecs_test_cmd.step);
+    ecs_test_step.dependOn(&run_ecs_tests.step);
+    test_step.dependOn(&run_ecs_tests.step);
+
+    // Flecs tests — needs flecs_c translated module + flecs static lib
+    const flecs_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/engine/ecs/flecs.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "flecs_c", .module = flecs_module },
+        },
+    });
+    const flecs_tests = b.addTest(.{ .root_module = flecs_test_mod });
+    flecs_tests.root_module.linkLibrary(flecs_lib);
+    if (os_tag == .windows) {
+        flecs_tests.root_module.linkSystemLibrary("dbghelp", .{});
+        flecs_tests.root_module.linkSystemLibrary("ws2_32", .{});
+    }
+    const run_flecs_tests = b.addRunArtifact(flecs_tests);
+    const flecs_test_step = b.step("test-flecs", "Run Flecs binding tests");
+    flecs_test_step.dependOn(&run_flecs_tests.step);
+    test_step.dependOn(&run_flecs_tests.step);
 }

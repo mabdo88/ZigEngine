@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const rgstry = @import("../engine/ecs/entity/registry.zig");
+const flecs = @import("../engine/ecs/flecs.zig");
+const components = @import("../engine/ecs/components/components.zig");
 const rs = @import("renderSystem.zig").RenderSystem;
 const zvkw = @import("zVulkanContext.zig");
 const upload = @import("upload.zig");
@@ -8,14 +9,13 @@ const device = @import("device.zig");
 const swapchain = @import("swapchain.zig");
 const pipeline = @import("pipeline.zig");
 const material = @import("material.zig");
-const event = @import("../engine/ecs/event.zig");
 const math = @import("../engine/math.zig");
 
 fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
 }
 
-pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry, render_system: *rs) !void {
+pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, world: *flecs.World, ids: components.ComponentIds, render_system: *rs) !void {
     zvkw.ctx.zallocator = zig_allocator;
     render_system.* = try rs.initCapacity(&zvkw.ctx, zig_allocator, 256, 64);
     try zvkw.win.init();
@@ -129,11 +129,15 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
         }
     }
 
-    try reg.events.subscribe(.entity_destroyed, @ptrCast(render_system), rs.onEntityDestroyed);
+    _ = world.observer(
+        &.{ids.Mesh},
+        &.{flecs.onRemove()},
+        rs.onMeshRemoved,
+        @ptrCast(render_system),
+    );
 }
 
-pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
-    _ = reg;
+pub fn deinit(render_system: *rs) void {
     _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
     zvkw.ctx.zallocator.free(zvkw.ctx.extensions);
     for (0..zvkw.ctx.textureCount) |i| {
@@ -186,7 +190,7 @@ pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
     zvkw.win.terminate();
 }
 
-pub fn render(matrices: math.CameraMatrices, reg: *rgstry.Registry, render_system: *rs, dt: f32) !void {
+pub fn render(matrices: math.CameraMatrices, world: *flecs.World, ids: components.ComponentIds, mesh_cache: anytype, render_system: *rs, dt: f32) !void {
     try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
 
     if (zvkw.win.wasResized()) {
@@ -292,7 +296,7 @@ pub fn render(matrices: math.CameraMatrices, reg: *rgstry.Registry, render_syste
     };
     zvkw.zvk.vkCmdSetScissor(cb, 0, 1, &scissor);
     zvkw.zvk.vkCmdBindPipeline(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipeline);
-    try render_system.update(reg, cb, dt);
+    try render_system.update(world, ids, mesh_cache, cb, dt);
     zvkw.zvk.vkCmdEndRendering(cb);
 
     const barrierPresent = zvkw.zvk.VkImageMemoryBarrier2{

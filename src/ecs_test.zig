@@ -1,10 +1,10 @@
 const std = @import("std");
 
 comptime {
-    // Core ECS
-    _ = @import("engine/ecs/entity/registry.zig");
-    _ = @import("engine/ecs/entity/componentStorage.zig");
-    _ = @import("engine/ecs/event.zig");
+    // Flecs wrapper
+    _ = @import("engine/ecs/flecs.zig");
+    // Components
+    _ = @import("engine/ecs/components/components.zig");
     // Systems
     _ = @import("engine/ecs/systems/system.zig");
     _ = @import("engine/ecs/systems/camera_system.zig");

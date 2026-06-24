@@ -1,9 +1,7 @@
 const std = @import("std");
-const Registry = @import("../entity/registry.zig").Registry;
-const Entity = @import("../entity/entity.zig").Entity;
+const flecs = @import("../flecs.zig");
 const components = @import("../components/components.zig");
-const event = @import("../event.zig");
-const SystemCreateCtx = @import("system.zig").SystemCreateCtx;
+const SharedContext = @import("system.zig").SharedContext;
 
 const renderer = @import("../../../renderer/zvulkanSystem.zig");
 const rs = @import("../../../renderer/renderSystem.zig");
@@ -18,22 +16,16 @@ pub const RenderSystemState = struct {
     allocator: std.mem.Allocator = undefined,
     texture_cache: std.AutoHashMap(u32, u32) = undefined,
 
-    pub fn init(self: *RenderSystemState, allocator: std.mem.Allocator, registry: *Registry, title: [:0]const u8, width: u16, height: u16) !void {
+    pub fn init(self: *RenderSystemState, allocator: std.mem.Allocator, world: *flecs.World, ids: components.ComponentIds, title: [:0]const u8, width: u16, height: u16) !void {
         self.allocator = allocator;
         self.texture_cache = std.AutoHashMap(u32, u32).init(allocator);
         try self.texture_cache.ensureTotalCapacity(@intCast(16));
-        try renderer.init(allocator, title, width, height, registry, &self.gpu_system);
+        try renderer.init(allocator, title, width, height, world, ids, &self.gpu_system);
     }
 
-    pub fn deinit(self: *RenderSystemState, registry: *Registry) void {
-        renderer.deinit(registry, &self.gpu_system);
+    pub fn deinit(self: *RenderSystemState) void {
+        renderer.deinit(&self.gpu_system);
         self.texture_cache.deinit();
-    }
-
-    pub fn onSceneUnloaded(ctx: *anyopaque, payload: event.EventPayload) void {
-        _ = payload;
-        const self: *RenderSystemState = @ptrCast(@alignCast(ctx));
-        self.texture_cache.clearRetainingCapacity();
     }
 
     pub fn pollEvents() void {
@@ -51,67 +43,78 @@ pub const RenderSystemState = struct {
     pub fn windowPtr() *window.Window {
         return renderer.windowPtr();
     }
+};
 
-    pub fn update(self: *RenderSystemState, registry: *Registry, dt: f32) !void {
-        shared_state.aspect_ratio = renderer.aspectRatio();
-        try self.uploadPendingTextures(registry);
+pub fn run(it: [*c]flecs.c.ecs_iter_t) callconv(.c) void {
+    const it_ptr: *flecs.c.ecs_iter_t = @ptrCast(it);
+    const ctx: *SharedContext = @ptrCast(@alignCast(it_ptr.ctx.?));
+    const state = render_state_ptr orelse return;
+    const dt: f32 = it_ptr.delta_time;
 
-        var cam_it = registry.Query(.{components.CameraMatricesComponent});
-        const cam_entity = cam_it.next() orelse return;
-        const m = registry.get(components.CameraMatricesComponent, cam_entity).?;
-        const matrices = math.CameraMatrices{ .view = m.view, .projection = m.proj };
+    shared_state.aspect_ratio = renderer.aspectRatio();
+    uploadPendingTextures(ctx, state) catch |err| {
+        std.log.err("render_system: uploadPendingTextures failed: {}", .{err});
+    };
 
-        try renderer.render(matrices, registry, &self.gpu_system, dt);
-    }
+    var q = ctx.world.query(&.{ctx.component_ids.CameraMatrices});
+    defer q.deinit();
+    var qit = q.iter();
+    if (!qit.next()) return;
+    const m = qit.fieldPtr(components.CameraMatricesComponent, 0).?;
+    const matrices = math.CameraMatrices{ .view = m.view, .projection = m.proj };
 
-    fn uploadPendingTextures(self: *RenderSystemState, registry: *Registry) !void {
-        var it = registry.Query(.{components.TextureDataComponent});
-        while (it.next()) |entity| {
-            const td = registry.get(components.TextureDataComponent, entity).?;
+    renderer.render(matrices, ctx.world, ctx.component_ids, ctx.mesh_cache, &state.gpu_system, dt) catch |err| {
+        std.log.err("render_system: renderer.render failed: {}", .{err});
+    };
+}
+
+fn uploadPendingTextures(ctx: *SharedContext, state: *RenderSystemState) !void {
+    const ids = ctx.component_ids;
+    var q = ctx.world.query(&.{ids.TextureData});
+    defer q.deinit();
+    var it = q.iter();
+    while (it.next()) {
+        const td_arr = it.field(components.TextureDataComponent, 0);
+        var row: i32 = 0;
+        while (row < it.count()) : (row += 1) {
+            const entity = it.entity(row);
+            const td = &td_arr[@intCast(row)];
 
             var index: u32 = 0;
             var resolved = false;
-            if (self.texture_cache.get(td.material_id)) |cached| {
+            if (state.texture_cache.get(td.material_id)) |cached| {
                 index = cached;
                 resolved = true;
             } else if (td.pixels.len > 0) {
                 index = try renderer.uploadTexture(td.pixels, td.width, td.height);
-                try self.texture_cache.put(td.material_id, index);
+                try state.texture_cache.put(td.material_id, index);
                 resolved = true;
-                self.allocator.free(td.pixels);
+                state.allocator.free(td.pixels);
                 td.pixels = &.{};
                 td.width = 0;
                 td.height = 0;
             }
 
             if (resolved) {
-                try registry.set(entity, components.TextureComponent{ .textureIndex = index });
-                registry.remove(components.TextureDataComponent, entity);
+                ctx.world.set(entity, components.TextureComponent, ids.Texture, .{ .textureIndex = index });
+                ctx.world.remove(entity, ids.TextureData);
             }
         }
     }
-};
-
-pub fn update(registry: *Registry, ctx: *anyopaque, dt: f32) anyerror!void {
-    const state: *RenderSystemState = @ptrCast(@alignCast(ctx));
-    try state.update(registry, dt);
 }
 
-pub fn create(ctx: *SystemCreateCtx) anyerror!*anyopaque {
+pub fn create(ctx: *SharedContext) !void {
     const state = try ctx.allocator.create(RenderSystemState);
-    try state.init(ctx.allocator, ctx.registry, ctx.config.window_title, ctx.config.window_width, ctx.config.window_height);
-    try ctx.registry.events.subscribe(.scene_unloaded, @ptrCast(state), RenderSystemState.onSceneUnloaded);
+    try state.init(ctx.allocator, ctx.world, ctx.component_ids, ctx.config.window_title, ctx.config.window_width, ctx.config.window_height);
     render_state_ptr = state;
-    shared_state.window_ptr = renderer.windowPtr();
     shared_state.aspect_ratio = renderer.aspectRatio();
-    return @ptrCast(state);
 }
 
-pub fn destroy(allocator: std.mem.Allocator, registry: *Registry, ctx: *anyopaque) void {
-    const state: *RenderSystemState = @ptrCast(@alignCast(ctx));
-    state.deinit(registry);
+pub fn destroy(ctx: *SharedContext) void {
+    const state = render_state_ptr orelse return;
+    state.deinit();
     render_state_ptr = null;
-    allocator.destroy(state);
+    ctx.allocator.destroy(state);
 }
 
 pub fn getGpuSystem() *rs.RenderSystem {

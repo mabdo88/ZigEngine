@@ -17,9 +17,24 @@ pub const Key = struct {
     pub const a = c.GLFW_KEY_A;
     pub const s = c.GLFW_KEY_S;
     pub const d = c.GLFW_KEY_D;
+    pub const e = c.GLFW_KEY_E;
+    pub const g = c.GLFW_KEY_G;
+    pub const h = c.GLFW_KEY_H;
+    pub const j = c.GLFW_KEY_J;
+    pub const k = c.GLFW_KEY_K;
+    pub const l = c.GLFW_KEY_L;
+    pub const y = c.GLFW_KEY_Y;
+    pub const u = c.GLFW_KEY_U;
+    pub const i = c.GLFW_KEY_I;
+    pub const o = c.GLFW_KEY_O;
+    pub const b = c.GLFW_KEY_B;
+    pub const n = c.GLFW_KEY_N;
+    pub const m = c.GLFW_KEY_M;
+    pub const semicolon = c.GLFW_KEY_SEMICOLON;
 };
 
 pub const MouseButton = struct {
+    pub const left = c.GLFW_MOUSE_BUTTON_LEFT;
     pub const right = c.GLFW_MOUSE_BUTTON_RIGHT;
 };
 

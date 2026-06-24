@@ -1,38 +1,51 @@
 const std = @import("std");
-const Registry = @import("ecs/entity/registry.zig").Registry;
-const SystemManager = @import("ecs/systems/system.zig").SystemManager;
-const SystemCreateCtx = @import("ecs/systems/system.zig").SystemCreateCtx;
-const all_systems = @import("ecs/systems/all_systems.zig").all_systems;
+const flecs = @import("ecs/flecs.zig");
+const components = @import("ecs/components/components.zig");
+const all_systems = @import("ecs/systems/all_systems.zig");
+const SharedContext = @import("ecs/systems/system.zig").SharedContext;
 const config_mod = @import("config.zig");
 const window = @import("../platform/window.zig");
 const render_system = @import("ecs/systems/render_system.zig");
+const MeshCache = @import("../resources/meshCache.zig").MeshCache;
 
 pub const VulkanWorld = struct {
-    registry: Registry,
-    system_manager: SystemManager,
+    world: flecs.World,
+    mesh_cache: MeshCache,
+    shared_ctx: SharedContext = undefined,
+    system_handles: all_systems.SystemHandles = .{},
+    config: config_mod.Config = undefined,
     last_time: f64,
+    interp_alpha: f32 = 0.0,
 
     pub fn init(self: *VulkanWorld, allocator: std.mem.Allocator, config: config_mod.Config) !void {
         self.* = VulkanWorld{
-            .registry = Registry.init(allocator),
-            .system_manager = undefined,
+            .world = flecs.World.init(),
+            .mesh_cache = MeshCache.init(allocator),
+            .config = config,
             .last_time = 0,
         };
 
-        var create_ctx = SystemCreateCtx{
+        const ids = components.registerAll(&self.world);
+
+        self.shared_ctx = .{
+            .world = &self.world,
+            .mesh_cache = &self.mesh_cache,
+            .config = &self.config,
             .allocator = allocator,
-            .registry = &self.registry,
-            .config = &config,
+            .component_ids = ids,
         };
 
-        self.system_manager = try SystemManager.init(allocator, &all_systems, &create_ctx);
+        self.system_handles = try all_systems.registerAll(&self.world, &self.shared_ctx);
 
         self.last_time = window.getTime();
     }
 
-    pub fn update(self: *VulkanWorld, dt: f32) !void {
-        window.pollEvents();
-        try self.system_manager.update(&self.registry, dt);
+    pub fn fixedUpdate(self: *VulkanWorld, dt: f32) !void {
+        _ = self.world.progress(dt);
+    }
+
+    pub fn renderUpdate(self: *VulkanWorld, alpha: f32) !void {
+        self.interp_alpha = alpha;
     }
 
     pub fn shouldClose(self: *VulkanWorld) bool {
@@ -40,7 +53,8 @@ pub const VulkanWorld = struct {
         return render_system.RenderSystemState.shouldClose();
     }
 
-    pub fn deltaTime(self: *VulkanWorld) f32 {
+    pub fn getRealDeltaTime(self: *VulkanWorld) f32 {
+        window.pollEvents();
         const now = window.getTime();
         const dt: f32 = @floatCast(now - self.last_time);
         self.last_time = now;
@@ -48,7 +62,8 @@ pub const VulkanWorld = struct {
     }
 
     pub fn deinit(self: *VulkanWorld) void {
-        self.system_manager.deinit(&self.registry);
-        self.registry.deinit();
+        self.world.deinit();
+        all_systems.destroyAll(&self.shared_ctx, self.system_handles);
+        self.mesh_cache.deinit();
     }
 };
