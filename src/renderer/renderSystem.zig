@@ -143,6 +143,10 @@ pub const RenderSystem = struct {
         _ = dt;
         zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, self.ctx.pipelineLayout, 0, 1, &self.ctx.uboDescriptorSets[self.ctx.frameIndex], 0, null);
         zvkw.zvk.vkCmdBindDescriptorSets(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, self.ctx.pipelineLayout, 1, 1, &self.ctx.bindlessDescriptorSet, 0, null);
+
+        const frame_base = self.ctx.frameIndex * zvkw.SKIN_MATRICES_PER_FRAME;
+        var next_skin_slot: u32 = zvkw.SKIN_IDENTITY_SLOT + 1;
+
         var it = registry.Query(.{components.MeshComponent});
         while (it.next()) |entity| {
             const mesh = registry.get(components.MeshComponent, entity).?;
@@ -162,6 +166,26 @@ pub const RenderSystem = struct {
 
             const model_matrix = if (registry.get(components.FinalTransformComponent, entity)) |ft| ft.matrix else math.identityMatrix();
 
+            // Writes this entity's skin matrices (world * inverse_bind, from
+            // SkinPaletteComponent — distinct from JointWorldComponent, which
+            // is debug-draw-only world transforms) into the current frame's
+            // region of the skin matrix buffer and points the push constant
+            // at them; falls back to SKIN_IDENTITY_SLOT (a no-op
+            // vertex.joints lookup, see Vertex's doc comment) if there's no
+            // skin, or if this frame's region is already full.
+            var skin_offset = frame_base + zvkw.SKIN_IDENTITY_SLOT;
+            if (registry.get(components.SkinPaletteComponent, entity)) |skin_comp| {
+                const count: u32 = @intCast(skin_comp.matrices.len);
+                if (next_skin_slot + count <= zvkw.SKIN_MATRICES_PER_FRAME) {
+                    const dst = self.ctx.skinMatrixBufferMapped.?[frame_base + next_skin_slot ..][0..count];
+                    @memcpy(dst, skin_comp.matrices);
+                    skin_offset = frame_base + next_skin_slot;
+                    next_skin_slot += count;
+                } else {
+                    log.warn(@src(), "RenderSystem: skin matrix buffer full this frame, entity {} renders unskinned", .{entity.index});
+                }
+            }
+
             const gpu_mesh = self.gpu_meshes.get(mesh_id).?;
             const offset: zvkw.zvk.VkDeviceSize = 0;
             zvkw.zvk.vkCmdBindVertexBuffers(cb, 0, 1, &gpu_mesh.vertexBuffer, &offset);
@@ -169,6 +193,7 @@ pub const RenderSystem = struct {
             const pc = zvkw.PushConstants{
                 .model = model_matrix,
                 .materialIndex = if (registry.get(components.MaterialComponent, entity)) |mc| mc.material_index else 0,
+                .skinOffset = skin_offset,
             };
 
             zvkw.zvk.vkCmdPushConstants(cb, self.ctx.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.PushConstants), @ptrCast(&pc));

@@ -54,16 +54,18 @@ pub fn createPipeline(ctx: *zvkw.VulkanContext) !void {
         .stride = @sizeOf(zvkw.Vertex),
         .inputRate = zvkw.zvk.VK_VERTEX_INPUT_RATE_VERTEX,
     };
-    const vertexAttribDescs = [3]zvkw.zvk.VkVertexInputAttributeDescription{
+    const vertexAttribDescs = [5]zvkw.zvk.VkVertexInputAttributeDescription{
         .{ .location = 0, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32B32_SFLOAT, .offset = @offsetOf(zvkw.Vertex, "pos") },
         .{ .location = 1, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32B32_SFLOAT, .offset = @offsetOf(zvkw.Vertex, "normal") },
         .{ .location = 2, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32_SFLOAT, .offset = @offsetOf(zvkw.Vertex, "uv") },
+        .{ .location = 3, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32B32A32_UINT, .offset = @offsetOf(zvkw.Vertex, "joints") },
+        .{ .location = 4, .binding = 0, .format = zvkw.zvk.VK_FORMAT_R32G32B32A32_SFLOAT, .offset = @offsetOf(zvkw.Vertex, "weights") },
     };
     const vertexInputCI = zvkw.zvk.VkPipelineVertexInputStateCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount = 1,
         .pVertexBindingDescriptions = &vertexBindingDesc,
-        .vertexAttributeDescriptionCount = 3,
+        .vertexAttributeDescriptionCount = 5,
         .pVertexAttributeDescriptions = &vertexAttribDescs,
     };
     const inputAssemblyCI = zvkw.zvk.VkPipelineInputAssemblyStateCreateInfo{
@@ -181,7 +183,7 @@ pub fn createDescriptorSetLayout(ctx: *zvkw.VulkanContext) !void {
     var result = zvkw.zvk.vkCreateDescriptorSetLayout(ctx.m_Device, &uboLayoutCI, null, &ctx.uboDescriptorSetLayout);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorSetLayoutFailed;
 
-    const bindlessBindings = [2]zvkw.zvk.VkDescriptorSetLayoutBinding{
+    const bindlessBindings = [3]zvkw.zvk.VkDescriptorSetLayoutBinding{
         .{
             .binding = 0,
             .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -194,21 +196,28 @@ pub fn createDescriptorSetLayout(ctx: *zvkw.VulkanContext) !void {
             .descriptorCount = 1,
             .stageFlags = zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
         },
+        .{
+            .binding = 2,
+            .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT,
+        },
     };
-    const bindlessBindingFlags = [2]u32{
+    const bindlessBindingFlags = [3]u32{
         zvkw.zvk.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | zvkw.zvk.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
+        0,
         0,
     };
     const bindingFlagsCI = zvkw.zvk.VkDescriptorSetLayoutBindingFlagsCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
-        .bindingCount = 2,
+        .bindingCount = 3,
         .pBindingFlags = &bindlessBindingFlags,
     };
     const bindlessLayoutCI = zvkw.zvk.VkDescriptorSetLayoutCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .flags = zvkw.zvk.VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
         .pNext = &bindingFlagsCI,
-        .bindingCount = 2,
+        .bindingCount = 3,
         .pBindings = &bindlessBindings,
     };
     result = zvkw.zvk.vkCreateDescriptorSetLayout(ctx.m_Device, &bindlessLayoutCI, null, &ctx.bindlessDescriptorSetLayout);
@@ -227,7 +236,7 @@ pub fn createDescriptorPool(ctx: *zvkw.VulkanContext) !void {
         },
         .{
             .type = zvkw.zvk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1,
+            .descriptorCount = 2,
         },
     };
     const poolCI = zvkw.zvk.VkDescriptorPoolCreateInfo{
@@ -271,6 +280,24 @@ pub fn writeMaterialDescriptor(ctx: *zvkw.VulkanContext) void {
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .dstSet = ctx.bindlessDescriptorSet,
         .dstBinding = 1,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pBufferInfo = &bufferInfo,
+    };
+    zvkw.zvk.vkUpdateDescriptorSets(ctx.m_Device, 1, &write, 0, null);
+}
+
+pub fn writeSkinMatrixDescriptor(ctx: *zvkw.VulkanContext) void {
+    const bufferInfo = zvkw.zvk.VkDescriptorBufferInfo{
+        .buffer = ctx.skinMatrixBuffer,
+        .offset = 0,
+        .range = zvkw.zvk.VK_WHOLE_SIZE,
+    };
+    const write = zvkw.zvk.VkWriteDescriptorSet{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = ctx.bindlessDescriptorSet,
+        .dstBinding = 2,
         .dstArrayElement = 0,
         .descriptorCount = 1,
         .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,

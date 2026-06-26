@@ -68,6 +68,49 @@ pub fn loadGltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
     if (result != gltf.cgltf_result_success) return error.gltfLoadBuffersFailed;
     if (data.*.meshes_count == 0) return error.gltfNoMeshes;
 
+    // Parsed before mesh vertices below because vertex JOINTS_0 values
+    // reference the skin's *original* joint order, not the topologically
+    // sorted skeleton loadSkin produces — skin0_old_to_new remaps them.
+    var skel_list: std.ArrayListUnmanaged(skeleton.Skeleton) = .empty;
+    errdefer {
+        for (skel_list.items) |*sk| sk.deinit();
+        skel_list.deinit(allocator);
+    }
+    var clip_list: std.ArrayListUnmanaged(clip.AnimationClip) = .empty;
+    errdefer {
+        for (clip_list.items) |*c| c.deinit();
+        clip_list.deinit(allocator);
+    }
+    var skin0_old_to_new: ?[]u32 = null;
+    defer if (skin0_old_to_new) |s| allocator.free(s);
+    // Note: no per-iteration errdefer on skin_result.skeleton here — once
+    // appended below it's also owned by skel_list, and an errdefer
+    // registered inside a loop body outlives that iteration (it's only
+    // cleared on function return), so it would double-free against the
+    // errdefer above if a later iteration failed. The list-iterating
+    // errdefer above is sufficient on its own.
+    for (0..data.*.skins_count) |si| {
+        const skin_result = try gltf_import.loadSkin(allocator, @ptrCast(&data.*.skins[si]));
+        defer allocator.free(skin_result.joint_nodes);
+        try skel_list.append(allocator, skin_result.skeleton);
+
+        if (si == 0) {
+            skin0_old_to_new = skin_result.old_to_new;
+
+            var joint_node_to_index = std.AutoHashMap(usize, u32).init(allocator);
+            defer joint_node_to_index.deinit();
+            for (skin_result.joint_nodes, 0..) |node_ptr, idx| try joint_node_to_index.put(@intFromPtr(node_ptr), @intCast(idx));
+
+            for (0..data.*.animations_count) |ai| {
+                if (try gltf_import.loadAnimationClip(allocator, @ptrCast(&data.*.animations[ai]), &joint_node_to_index)) |c| {
+                    try clip_list.append(allocator, c);
+                }
+            }
+        } else {
+            allocator.free(skin_result.old_to_new);
+        }
+    }
+
     const PrimMeshMap = std.AutoHashMap(usize, u32);
     var prim_to_mesh = PrimMeshMap.init(allocator);
     defer prim_to_mesh.deinit();
@@ -90,12 +133,16 @@ pub fn loadGltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
             var pos_acc: ?*gltf.struct_cgltf_accessor = null;
             var nrm_acc: ?*gltf.struct_cgltf_accessor = null;
             var uv_acc: ?*gltf.struct_cgltf_accessor = null;
+            var joints_acc: ?*gltf.struct_cgltf_accessor = null;
+            var weights_acc: ?*gltf.struct_cgltf_accessor = null;
             for (0..prim.attributes_count) |ai| {
                 const attr = prim.attributes[ai];
                 switch (attr.type) {
                     gltf.cgltf_attribute_type_position => pos_acc = attr.data,
                     gltf.cgltf_attribute_type_normal => nrm_acc = attr.data,
                     gltf.cgltf_attribute_type_texcoord => uv_acc = attr.data,
+                    gltf.cgltf_attribute_type_joints => joints_acc = attr.data,
+                    gltf.cgltf_attribute_type_weights => weights_acc = attr.data,
                     else => {},
                 }
             }
@@ -113,10 +160,28 @@ pub fn loadGltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
                 _ = gltf.cgltf_accessor_read_float(pos_acc.?, i, &pos, 3);
                 _ = gltf.cgltf_accessor_read_float(nrm_acc.?, i, &nrm, 3);
                 _ = gltf.cgltf_accessor_read_float(uv_acc.?, i, &uv, 2);
+
+                // joints/weights default to (0,0,0,0)/(1,0,0,0), which routes
+                // through skin matrix SKIN_IDENTITY_SLOT — see Vertex's doc
+                // comment — so meshes without a skin don't need a branch here.
+                var joints: [4]u32 = .{ 0, 0, 0, 0 };
+                var weights: [4]f32 = .{ 1, 0, 0, 0 };
+                if (joints_acc != null and weights_acc != null) {
+                    _ = gltf.cgltf_accessor_read_uint(joints_acc.?, i, &joints, 4);
+                    _ = gltf.cgltf_accessor_read_float(weights_acc.?, i, &weights, 4);
+                    // JOINTS_0 references the skin's original joint order,
+                    // not the topologically-sorted skeleton — remap.
+                    if (skin0_old_to_new) |map| {
+                        for (&joints) |*j| j.* = map[j.*];
+                    }
+                }
+
                 vertices[i] = .{
                     .pos = .{ pos[0], pos[1], pos[2] },
                     .normal = .{ nrm[0], nrm[1], nrm[2] },
                     .uv = .{ uv[0], uv[1] },
+                    .joints = .{ joints[0], joints[1], joints[2], joints[3] },
+                    .weights = .{ weights[0], weights[1], weights[2], weights[3] },
                 };
             }
 
@@ -234,40 +299,6 @@ pub fn loadGltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
                 .material_idx = 0,
                 .transform = identity,
             });
-        }
-    }
-
-    var skel_list: std.ArrayListUnmanaged(skeleton.Skeleton) = .empty;
-    errdefer {
-        for (skel_list.items) |*sk| sk.deinit();
-        skel_list.deinit(allocator);
-    }
-    var clip_list: std.ArrayListUnmanaged(clip.AnimationClip) = .empty;
-    errdefer {
-        for (clip_list.items) |*c| c.deinit();
-        clip_list.deinit(allocator);
-    }
-    // Note: no per-iteration errdefer on skin_result.skeleton here — once
-    // appended below it's also owned by skel_list, and an errdefer
-    // registered inside a loop body outlives that iteration (it's only
-    // cleared on function return), so it would double-free against the
-    // errdefer above if a later iteration failed. The list-iterating
-    // errdefer above is sufficient on its own.
-    for (0..data.*.skins_count) |si| {
-        const skin_result = try gltf_import.loadSkin(allocator, @ptrCast(&data.*.skins[si]));
-        defer allocator.free(skin_result.joint_nodes);
-        try skel_list.append(allocator, skin_result.skeleton);
-
-        if (si == 0) {
-            var joint_node_to_index = std.AutoHashMap(usize, u32).init(allocator);
-            defer joint_node_to_index.deinit();
-            for (skin_result.joint_nodes, 0..) |node_ptr, idx| try joint_node_to_index.put(@intFromPtr(node_ptr), @intCast(idx));
-
-            for (0..data.*.animations_count) |ai| {
-                if (try gltf_import.loadAnimationClip(allocator, @ptrCast(&data.*.animations[ai]), &joint_node_to_index)) |c| {
-                    try clip_list.append(allocator, c);
-                }
-            }
         }
     }
 

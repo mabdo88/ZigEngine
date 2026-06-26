@@ -20,6 +20,16 @@ pub const SHADOW_MAP_FORMAT: zvk.VkFormat = zvk.VK_FORMAT_D32_SFLOAT;
 
 pub const MAX_DEBUG_VERTICES: u32 = 65536;
 
+/// Per-frame-in-flight region of the skin matrix buffer. Sized generously
+/// for a handful of animated humanoid-scale skeletons (~20-128 joints each)
+/// per frame; bump if a scene needs more animated entities at once.
+pub const SKIN_MATRICES_PER_FRAME: u32 = 4096;
+/// Relative offset within a frame's region that's always written as
+/// identity each frame — unskinned draws point their push constant here
+/// (frameIndex * SKIN_MATRICES_PER_FRAME + SKIN_IDENTITY_SLOT) so the same
+/// shader path works for skinned and unskinned vertices alike.
+pub const SKIN_IDENTITY_SLOT: u32 = 0;
+
 pub const ShaderData = struct {
     projection: [4][4]f32,
     view: [4][4]f32,
@@ -31,15 +41,26 @@ pub const ShaderDataBuffer = struct {
     allocInfo: vma.VmaAllocationInfo = undefined,
     deviceAddress: zvk.VkDeviceAddress = 0,
 };
+/// Must stay byte-identical to engine.ecs.components.Vertex — renderSystem.zig
+/// uploads that type's raw bytes straight into a buffer using this layout.
 pub const Vertex = struct {
     pos: @Vector(3, f32),
     normal: @Vector(3, f32),
     uv: @Vector(2, f32),
+    joints: @Vector(4, u32) = .{ 0, 0, 0, 0 },
+    weights: @Vector(4, f32) = .{ 1, 0, 0, 0 },
 };
 pub const PushConstants = struct {
     model: [4][4]f32,
     materialIndex: u32,
-    pad: [3]u32 = .{ 0, 0, 0 },
+    /// Absolute index into the skin matrix buffer for this draw's joint 0
+    /// (frameIndex * SKIN_MATRICES_PER_FRAME + a relative offset); the
+    /// shader adds each vertex's `joints` values to it. Always set
+    /// explicitly per draw in renderSystem.zig — the 0 default here is only
+    /// ever overwritten, never relied on (frame context isn't known at
+    /// struct-definition time).
+    skinOffset: u32 = 0,
+    pad: [2]u32 = .{ 0, 0 },
 };
 pub const ShadowPushConstants = struct {
     mvp: [4][4]f32,
@@ -135,6 +156,15 @@ pub const VulkanContext = struct {
     debugPipeline: zvk.VkPipeline = null,
     debugPipelineLayout: zvk.VkPipelineLayout = null,
     debugVertexBuffers: [max_frames_in_flight]ShaderDataBuffer = undefined,
+
+    // Single buffer split into max_frames_in_flight regions of
+    // SKIN_MATRICES_PER_FRAME mat4s each, rather than one buffer per frame —
+    // lets the bindless descriptor binding stay static (whole-buffer range)
+    // since draws address it via an already frame-relative push-constant
+    // offset instead of needing the binding repointed every frame.
+    skinMatrixBuffer: zvk.VkBuffer = null,
+    skinMatrixBufferAllocation: vma.VmaAllocation = null,
+    skinMatrixBufferMapped: ?[*][4][4]f32 = null,
 
     vsync: bool = true,
 };

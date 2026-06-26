@@ -4,6 +4,8 @@ struct VSInput {
     float3 Pos: POSITION;
     float3 Normal: NORMAL;
     float2 UV : TEXCOORD0;
+    uint4 Joints : TEXCOORD1;
+    float4 Weights : TEXCOORD2;
 };
 
 struct FrameUBO {
@@ -17,6 +19,11 @@ struct FrameUBO {
 struct PushConstants {
     float4x4 model;
     uint materialIndex;
+    // Absolute index into `skinMatrices` for joint 0 of this draw; unskinned
+    // vertices have Weights = (1,0,0,0) so only skinMatrices[skinOffset] is
+    // ever sampled, and that slot is always identity (see
+    // zVulkanContext.SKIN_IDENTITY_SLOT) — same shader path either way.
+    uint skinOffset;
 };
 struct MaterialData {
     float metallic;
@@ -39,6 +46,8 @@ Sampler2D shadowMap;
 Sampler2D textures[];
 [[vk::binding(1, 1)]]
 StructuredBuffer<MaterialData> materials;
+[[vk::binding(2, 1)]]
+StructuredBuffer<float4x4> skinMatrices;
 
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> pc;
@@ -49,9 +58,17 @@ static const float SHADOW_BIAS = 0.005;
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput output;
-    float4 worldPos = mul(pc.model, float4(input.Pos, 1.0));
+
+    float4x4 skin =
+        skinMatrices[pc.skinOffset + input.Joints.x] * input.Weights.x +
+        skinMatrices[pc.skinOffset + input.Joints.y] * input.Weights.y +
+        skinMatrices[pc.skinOffset + input.Joints.z] * input.Weights.z +
+        skinMatrices[pc.skinOffset + input.Joints.w] * input.Weights.w;
+    float4x4 modelSkin = mul(pc.model, skin);
+
+    float4 worldPos = mul(modelSkin, float4(input.Pos, 1.0));
     output.Pos = mul(ubo.projection, mul(ubo.view, worldPos));
-    output.Normal = mul((float3x3)pc.model, input.Normal);
+    output.Normal = mul((float3x3)modelSkin, input.Normal);
     output.UV = input.UV;
     output.LightSpacePos = mul(ubo.lightViewProj, worldPos);
     output.WorldPos = worldPos.xyz;

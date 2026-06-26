@@ -251,7 +251,10 @@ pub const SceneSystemState = struct {
                 try registry.add(entity, components.PoseBufferComponent{
                     .poses = try sk.bindPoseTRS(registry.registry_allocator),
                 });
-                try registry.add(entity, components.SkinMatricesComponent{
+                try registry.add(entity, components.JointWorldComponent{
+                    .matrices = try registry.registry_allocator.alloc([4][4]f32, sk.joint_count),
+                });
+                try registry.add(entity, components.SkinPaletteComponent{
                     .matrices = try registry.registry_allocator.alloc([4][4]f32, sk.joint_count),
                 });
                 if (preloaded.clip_id) |clip_id| {

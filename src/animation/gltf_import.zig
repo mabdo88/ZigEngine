@@ -57,6 +57,12 @@ pub const SkinResult = struct {
     /// arrays — kept only long enough to map animation channels' target
     /// nodes onto skeleton joint indices, then freed by the caller.
     joint_nodes: [][*c]gltf.cgltf_node,
+    /// old_to_new[i] is the skeleton joint index that vertex attribute
+    /// JOINTS_0 value `i` (the skin's *original*, pre-remap joint order)
+    /// now corresponds to. Vertex joint indices reference the skin's
+    /// original joints array, not the topologically-sorted skeleton, so
+    /// they must be passed through this before use — caller frees.
+    old_to_new: []u32,
 };
 
 /// Builds a runtime `Skeleton` from a cgltf skin: remaps joints into
@@ -89,7 +95,7 @@ pub fn loadSkin(allocator: std.mem.Allocator, skin: *gltf.cgltf_skin) !SkinResul
     for (0..n) |i| try visitJointTopo(@intCast(i), raw_parent, visited, &order, allocator);
 
     const new_index_of_old = try allocator.alloc(u32, n);
-    defer allocator.free(new_index_of_old);
+    errdefer allocator.free(new_index_of_old);
     for (order.items, 0..) |old_i, new_i| new_index_of_old[old_i] = @intCast(new_i);
 
     const parent_indices = try allocator.alloc(i32, n);
@@ -143,6 +149,7 @@ pub fn loadSkin(allocator: std.mem.Allocator, skin: *gltf.cgltf_skin) !SkinResul
             .allocator = allocator,
         },
         .joint_nodes = joint_nodes,
+        .old_to_new = new_index_of_old,
     };
 }
 

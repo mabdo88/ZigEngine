@@ -10,6 +10,7 @@ const pipeline = @import("pipeline.zig");
 const material = @import("material.zig");
 const shadow = @import("shadow.zig");
 const debug = @import("debug.zig");
+const skinning = @import("skinning.zig");
 const event = @import("../engine/ecs/event.zig");
 const math = @import("../engine/math.zig");
 const hotreload = @import("../engine/hotreload.zig");
@@ -190,6 +191,10 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
     errdefer material.destroyMaterialBuffer(&zvkw.ctx);
     pipeline.writeMaterialDescriptor(&zvkw.ctx);
 
+    try skinning.createSkinMatrixBuffer(&zvkw.ctx);
+    errdefer skinning.destroySkinMatrixBuffer(&zvkw.ctx);
+    pipeline.writeSkinMatrixDescriptor(&zvkw.ctx);
+
     try shadow.createShadowResources(&zvkw.ctx);
     errdefer shadow.destroyShadowResources(&zvkw.ctx);
 
@@ -221,6 +226,7 @@ pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
     shadow.destroyShadowPipeline(&zvkw.ctx);
     shadow.destroyShadowResources(&zvkw.ctx);
     material.destroyMaterialBuffer(&zvkw.ctx);
+    skinning.destroySkinMatrixBuffer(&zvkw.ctx);
     zvkw.ctx.zallocator.free(zvkw.ctx.extensions);
     for (0..zvkw.ctx.textureCount) |i| {
         zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.textureSlots[i].view, null);

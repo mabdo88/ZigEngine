@@ -4,6 +4,7 @@ const components = @import("../components/components.zig");
 const SystemCreateCtx = @import("system.zig").SystemCreateCtx;
 const clip_mod = @import("../../../animation/clip.zig");
 const skeleton_mod = @import("../../../animation/skeleton.zig");
+const math = @import("../../math.zig");
 
 pub const AnimPlayerSystemState = struct {
     pub fn update(self: *AnimPlayerSystemState, registry: *Registry, dt: f32) anyerror!void {
@@ -29,10 +30,19 @@ pub const AnimPlayerSystemState = struct {
             @memcpy(pose_comp.poses, sk.rest_local_poses);
             clip_mod.sampleClip(c, player.time, pose_comp.poses);
 
-            if (registry.get(components.SkinMatricesComponent, entity)) |skin_comp| {
+            const world_comp = registry.get(components.JointWorldComponent, entity);
+            const palette_comp = registry.get(components.SkinPaletteComponent, entity);
+            if (world_comp != null or palette_comp != null) {
                 var local_mats: [skeleton_mod.MAX_JOINTS][4][4]f32 = undefined;
                 for (pose_comp.poses, 0..) |p, i| local_mats[i] = p.toMatrix();
-                skeleton_mod.computeWorldTransforms(sk, local_mats[0..sk.joint_count], skin_comp.matrices);
+
+                var world_buf: [skeleton_mod.MAX_JOINTS][4][4]f32 = undefined;
+                const world = if (world_comp) |wc| wc.matrices else world_buf[0..sk.joint_count];
+                skeleton_mod.computeWorldTransforms(sk, local_mats[0..sk.joint_count], world);
+
+                if (palette_comp) |pc| {
+                    for (0..sk.joint_count) |i| pc.matrices[i] = math.matMul(world[i], sk.inverse_bind_matrices[i]);
+                }
             }
         }
     }
@@ -62,8 +72,8 @@ test "AnimPlayer advances time, loops, and writes a sampled pose + world transfo
     var sk = skeleton_mod.Skeleton{
         .joint_count = 1,
         .parent_indices = try allocator.dupe(i32, &.{-1}),
-        .inverse_bind_matrices = try allocator.dupe([4][4]f32, &.{undefined}),
-        .rest_local_transforms = try allocator.dupe([4][4]f32, &.{undefined}),
+        .inverse_bind_matrices = try allocator.dupe([4][4]f32, &.{math.identityMatrix()}),
+        .rest_local_transforms = try allocator.dupe([4][4]f32, &.{math.identityMatrix()}),
         .rest_local_poses = try allocator.dupe(clip_mod.JointPose, &.{.{}}),
         .allocator = allocator,
     };
@@ -88,7 +98,8 @@ test "AnimPlayer advances time, loops, and writes a sampled pose + world transfo
     try reg.add(entity, components.SkeletonComponent{ .skeleton_id = skeleton_id });
     try reg.add(entity, components.AnimPlayerComponent{ .clip_id = clip_id, .loop = true });
     try reg.add(entity, components.PoseBufferComponent{ .poses = try allocator.alloc(clip_mod.JointPose, 1) });
-    try reg.add(entity, components.SkinMatricesComponent{ .matrices = try allocator.alloc([4][4]f32, 1) });
+    try reg.add(entity, components.JointWorldComponent{ .matrices = try allocator.alloc([4][4]f32, 1) });
+    try reg.add(entity, components.SkinPaletteComponent{ .matrices = try allocator.alloc([4][4]f32, 1) });
 
     var state = AnimPlayerSystemState{};
     try state.update(&reg, 1.0); // time = 1.0 -> halfway
@@ -96,8 +107,13 @@ test "AnimPlayer advances time, loops, and writes a sampled pose + world transfo
     const pose = reg.get(components.PoseBufferComponent, entity).?;
     try std.testing.expectApproxEqAbs(@as(f32, 5.0), pose.poses[0].translation[0], 1e-5);
 
-    const skin = reg.get(components.SkinMatricesComponent, entity).?;
-    try std.testing.expectApproxEqAbs(@as(f32, 5.0), skin.matrices[0][3][0], 1e-5);
+    const world = reg.get(components.JointWorldComponent, entity).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 5.0), world.matrices[0][3][0], 1e-5);
+
+    // inverse_bind_matrices is identity in this synthetic skeleton, so the
+    // palette (world * inverse_bind) should equal world exactly.
+    const palette = reg.get(components.SkinPaletteComponent, entity).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 5.0), palette.matrices[0][3][0], 1e-5);
 
     try state.update(&reg, 1.5); // time = 2.5 -> wraps to 0.5 -> quarter
     try std.testing.expectApproxEqAbs(@as(f32, 2.5), pose.poses[0].translation[0], 1e-5);
