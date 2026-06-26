@@ -368,6 +368,21 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
     };
 }
 
+test "loadgltf: a real skinned asset (Cesium Man) parses one topologically-sorted skeleton" {
+    const allocator = std.testing.allocator;
+    var scene = try loadgltf(allocator, "assets/Cesium_Man.glb");
+    defer scene.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), scene.skeletons.len);
+    const sk = scene.skeletons[0];
+    try std.testing.expect(sk.joint_count > 1);
+    try std.testing.expectEqual(@as(i32, -1), sk.parent_indices[0]);
+    for (1..sk.joint_count) |i| {
+        try std.testing.expect(sk.parent_indices[i] >= 0);
+        try std.testing.expect(sk.parent_indices[i] < @as(i32, @intCast(i)));
+    }
+}
+
 fn nodeWorldTransform(node: *gltf.cgltf_node) [4][4]f32 {
     var view = NodeView{ .node = node };
     var local = view.localTransform();

@@ -17,3 +17,11 @@ pub fn main() !void {
     defer engine.deinit();
     try engine.run();
 }
+
+// Forces test discovery for files only reached through the runtime call
+// graph (scene_system.zig -> meshLoader.zig, etc.) — `zig build test`'s
+// exe_tests otherwise finds 0 tests here, same reason ecs_test.zig exists
+// as an explicit aggregator for the GPU-free test target.
+comptime {
+    _ = @import("resources/meshLoader.zig");
+}
