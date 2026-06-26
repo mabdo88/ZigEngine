@@ -6,7 +6,7 @@ ZigEngine started life as a C++ project and was rewritten in Zig for its simplic
 
 > **Naming:** the engine is **ZigEngine**; the game being built on it is **Strife**, an isometric ARPG (hero-tier entities are **Emenders**, horde enemies are **Knaves**). These product names appear in the [`ecs-research/`](ecs-research/) module.
 
-> **Status:** early / pre-alpha. The renderer loads glTF and OBJ models with PBR materials, draws directional-light shadows with PCF filtering, hot-reloads shaders on save, and scenes can be hot-swapped at runtime; the ECS drives a priority-ordered system pipeline with delta-time updates, entity hierarchy/parenting, and an async asset manager. APIs change frequently (see [Platform support](#platform-support)).
+> **Status:** early / pre-alpha. The renderer loads glTF and OBJ models with PBR materials, draws directional-light shadows with PCF filtering, hot-reloads shaders on save, and scenes can be hot-swapped at runtime; the ECS drives a priority-ordered system pipeline with delta-time updates, entity hierarchy/parenting, GPU-skinned skeletal animation (blend trees + state machines), Jolt-powered physics (collision, raycasts, character controller, triggers), JSON-defined prefabs with a spawner system, and scene save/load. APIs change frequently (see [Platform support](#platform-support)).
 
 ---
 
@@ -43,6 +43,10 @@ ZigEngine started life as a C++ project and was rewritten in Zig for its simplic
 - **Async asset manager** — generic `AssetManager(T)` with generational handles, ref counting, path dedup, and background-thread loading with `unloaded`/`loading`/`ready`/`failed` states.
 - **INI-driven config overlay** — `strife.ini` overlays window size, vsync, and validation-layer settings onto `Config.default` via a hand-rolled `ini.zig` parser.
 - **`std.Io`-based platform layer** — timer, filesystem, job system, and UUID generation (`timer.zig`, `fs.zig`, `jobs.zig`, `uuid.zig`) built on Zig master's `std.Io` abstraction rather than the now-removed `std.time`/`std.fs.cwd()`/`std.Thread` primitives.
+- **Skeletal animation** — glTF skin/animation import, GPU vertex skinning (bindless skin-matrix buffer, up to 4 joints/vertex), an `AnimPlayer` sampler with TRS keyframe interpolation (lerp + slerp), 1D blend trees, an animation state machine with blended transitions, and keyframe animation events delivered through the `EventBus`.
+- **Physics via Jolt** — collision (static/dynamic boxes synced into `TransformComponent`), raycasts (single + multi-hit), a `CharacterVirtual`-based character controller with gravity/jump, sensor triggers re-emitted as `EventBus` events, and a fixed collision-layer matrix (static/player/enemy/projectile/trigger).
+- **Prefabs & spawning** — JSON-defined prefabs (`assets/prefabs/*.json`) loaded into a `PrefabRegistry` and instantiated by mesh/material asset path (single entity or parent+children for multi-primitive assets); `SpawnPointComponent` periodically spawns prefab instances up to a cap and self-corrects its active count via the `EventBus`.
+- **Scene save/load** — UUID-tagged spawn points and prefab instances round-trip to/from JSON; static glTF/OBJ scene geometry is reconstructed by re-running the existing preload pipeline rather than being re-serialized.
 
 ## Architecture
 
@@ -56,14 +60,19 @@ Engine(WorldType)           generic engine shell — owns allocator, runs main l
     │   ├── MeshCache         deduplicated mesh storage keyed by mesh ID
     │   └── EventBus        pub/sub for entity_destroyed, scene_unloaded
     ├── SystemManager      create/destroy lifecycle + priority-sorted update
-    │   └── all_systems.zig  declarative SystemDesc array (Input → Scene → Movement → Camera → Render)
+    │   └── all_systems.zig  declarative SystemDesc array (Input → Prefab → Scene → Spawner → Movement → Camera → AnimPlayer → Physics → Transform → Hierarchy → Render)
     ├── shared_state.zig   cross-system globals: window ptr, aspect ratio, fly-cam input
     └── Systems (update order by priority)
-        ├── InputSystem     GLFW keys/mouse, scene switching, fly-cam input   (priority -100)
-        ├── SceneSystem     background preload, load/unload, entity spawning    (priority 0)
-        ├── MovementSystem  delta-time animation (e.g. duck rotation)         (priority 1)
-        ├── CameraSystem    fly-cam movement + view/projection matrices       (priority 2)
-        └── RenderSystem    uploads meshes/textures, records draw calls       (priority 100)
+        ├── InputSystem             GLFW keys/mouse, scene switching, fly-cam input   (priority -100)
+        ├── PrefabSystem            owns the global PrefabRegistry, auto-loads assets/prefabs/*.json (priority -10)
+        ├── SceneSystem             background preload, load/unload, entity spawning    (priority 0)
+        ├── SpawnerSystem           ticks SpawnPointComponents, instantiates prefabs    (priority 1)
+        ├── MovementSystem          delta-time animation (e.g. duck rotation)          (priority 2)
+        ├── CameraSystem            fly-cam movement + view/projection matrices         (priority 3)
+        ├── AnimPlayerSystem        samples clips, GPU skinning, anim events            (priority 10)
+        ├── PhysicsSync/Character/TriggerSystem  Jolt step, character controller, triggers (priority 20-22)
+        ├── TransformSystem / HierarchySystem    FinalTransformComponent propagation    (priority 50/60)
+        └── RenderSystem            uploads meshes/textures, records draw calls          (priority 100)
 ```
 
 Components (`src/engine/ecs/components/components.zig`):
@@ -82,6 +91,11 @@ Components (`src/engine/ecs/components/components.zig`):
 | `SceneActiveTag`          | marks the currently active scene                       |
 | `ScenePendingTag`         | marks a scene requested for loading                     |
 | `SceneOwnedComponent`     | links spawned entities to their owning scene           |
+| `SkeletonComponent` / `AnimPlayerComponent` | skinned-mesh skeleton ref + clip playback state |
+| `PhysicsBodyComponent` / `CharacterControllerComponent` / `TriggerWatcherComponent` | Jolt rigid body / character controller / sensor handles |
+| `UuidComponent`           | stable cross-session identity for scene save/load      |
+| `PrefabInstanceComponent` | links an entity to the `PrefabRegistry` def that spawned it |
+| `SpawnPointComponent` / `SpawnedByComponent` | periodic prefab spawning + reverse spawner link |
 | `MeshCache`               | deduplicated mesh storage keyed by mesh ID (on Registry) |
 
 The Vulkan backend lives under `src/renderer/`:
@@ -118,6 +132,8 @@ The Vulkan backend lives under `src/renderer/`:
 - **Transform system overhaul**: `BakedTransformComponent` preserves full glTF transforms while `TransformComponent` provides local overrides. A dedicated `TransformSystem` recomputes `FinalTransformComponent = baked × local` once per frame; the renderer just reads it instead of redoing the multiply itself.
 - **GPU mesh refcounting**: `RenderSystem.attachMesh` with reference-counted `GpuMesh` pointers prevents double-free when multiple entities share the same mesh.
 - **Type-safe glTF node access**: `NodeView` adapter struct replaces `anytype`-based C pointer access in the glTF loader.
+
+> This list covers the renderer/ECS-foundation era (M0–M3). Animation (M4), physics (M5), and scene/prefabs/spawning (M6) landed afterward — see the per-task notes in `CLAUDE.md` for those.
 
 ## Project layout
 
@@ -159,9 +175,33 @@ src/
 │           ├── scene_system.zig  background preload, scene load/unload, entity spawning
 │           ├── movement_system.zig  delta-time animation
 │           ├── camera_system.zig fly-cam movement + view/projection matrices
+│           ├── anim_player_system.zig  samples clips, GPU skinning, fires anim events
+│           ├── physics_sync_system.zig  Jolt step, writes back to TransformComponent
+│           ├── character_controller_system.zig  CharacterVirtual update + gravity/jump
+│           ├── trigger_system.zig  drains Jolt sensor events onto the EventBus
 │           ├── transform_system.zig  FinalTransformComponent = baked * local
 │           ├── hierarchy_system.zig  parent-chain transform propagation
 │           └── render_system.zig ECS render system (delegates to renderer)
+├── animation/                     skeletal animation
+│   ├── skeleton.zig               Skeleton asset + skin-matrix computation
+│   ├── clip.zig                   AnimationClip sampling, blending, anim events
+│   ├── gltf_import.zig            cgltf skin/animation parsing
+│   ├── anim_cache.zig             SkeletonCache / ClipCache (Registry-owned)
+│   ├── blend_tree.zig             1D blend space
+│   └── state_machine.zig          ASM with blended transitions
+├── physics/                       Jolt Physics integration
+│   ├── physics_world.zig          Jolt init/step, body↔entity map
+│   ├── jolt_wrapper.cpp/.h/.zig   extern "C" Jolt surface + pre-generated bindings
+│   ├── raycast.zig                single/multi-hit raycasts
+│   ├── character_controller.zig   CharacterVirtual wrapper (gravity/jump)
+│   ├── trigger.zig                sensor-volume spawn helper
+│   ├── collision_layers.zig       ObjectLayer enum + collision matrix
+│   └── physics_shared.zig         module-level PhysicsWorld access (GPU-test-safe)
+├── scene/                         prefabs, spawning, scene save/load
+│   ├── prefab.zig                 PrefabRegistry: JSON defs, instantiate/destroyInstance
+│   ├── spawner.zig                SpawnerSystem: cooldown spawning + death observer
+│   ├── scene_save.zig             serializes spawn points + prefab instances to JSON
+│   └── scene_load.zig             restores them, re-triggers the scene preload pipeline
 ├── renderer/                     Vulkan renderer
 │   ├── zVulkanContext.zig        VulkanContext struct + constants
 │   ├── zvulkanSystem.zig         init/deinit, per-frame render loop
@@ -203,7 +243,9 @@ deps/                             third-party dependencies
 assets/                           game assets
     ├── duck/                     duck glTF model + textures
     ├── House/                    hillside retreat house model
-    └── shaders/                  shader sources + compiled SPIR-V
+    ├── Cesium_Man.glb            skinned/animated sample (Khronos), used for M4/M5 verification
+    ├── cube.obj / cube.json      OBJ test asset + sibling material JSON
+    └── prefabs/                  JSON prefab defs auto-loaded by PrefabRegistry (e.g. cube.json)
 docs/                             documentation
 ```
 
@@ -249,7 +291,7 @@ zig build -Dvulkan-sdk=/path/to/VulkanSDK/1.4.341.1
 
 ## Roadmap
 
-Milestones M0–M2 (foundation, ECS, assets) are complete; M3 (renderer) is in progress. See `CLAUDE.md` for the full per-task breakdown.
+Milestones M0–M6 (foundation, ECS, assets, renderer, animation, physics, scene/prefabs/spawning) are complete. See `CLAUDE.md` for the full per-task breakdown.
 
 - [x] ~~Scene/asset management and a proper update loop with delta time~~
 - [x] ~~Input system~~
@@ -263,9 +305,13 @@ Milestones M0–M2 (foundation, ECS, assets) are complete; M3 (renderer) is in p
 - [x] ~~Entity hierarchy / parenting~~
 - [x] ~~Shader hot reload~~
 - [x] ~~Async asset manager~~
-- [ ] Debug draw (`dd_axes`/`dd_box`/`dd_sphere`)
-- [ ] Animation (M4)
-- [ ] Physics via Jolt (M5)
+- [x] ~~Debug draw (`dd_axes`/`dd_box`/`dd_sphere`)~~
+- [x] ~~Animation (M4) — skeletons, GPU skinning, AnimPlayer, blend trees, state machine, anim events~~
+- [x] ~~Physics via Jolt (M5) — collision, raycasts, character controller, triggers, collision layers~~
+- [x] ~~Scene (M6) — prefabs, spawner, scene save/load~~
+- [ ] Audio (M7)
+- [ ] UI (M8)
+- [ ] Gameplay-ready systems: health, combat, abilities, inventory, AI, projectiles, save/load (M9)
 
 ## Acknowledgements
 
