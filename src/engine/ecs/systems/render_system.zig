@@ -76,8 +76,29 @@ pub const RenderSystemState = struct {
         };
 
         renderer.ddAxes(.{ 0.0, 0.0, 0.0 }, 1.0);
+        drawSkeletons(registry);
 
         try renderer.render(matrices, light, registry, &self.gpu_system, dt);
+    }
+
+    /// Draws every animated entity's joint hierarchy as yellow lines — the
+    /// SkinMatricesComponent stores world transforms (see its doc comment),
+    /// so bone[i]'s endpoint is just the translation column.
+    fn drawSkeletons(registry: *Registry) void {
+        var it = registry.Query(.{ components.SkeletonComponent, components.SkinMatricesComponent });
+        while (it.next()) |entity| {
+            const skel_comp = registry.get(components.SkeletonComponent, entity).?;
+            const skin_comp = registry.get(components.SkinMatricesComponent, entity).?;
+            const sk = registry.skeleton_cache.get(skel_comp.skeleton_id) orelse continue;
+
+            for (0..sk.joint_count) |i| {
+                const parent = sk.parent_indices[i];
+                if (parent < 0) continue;
+                const a: @Vector(3, f32) = .{ skin_comp.matrices[@intCast(parent)][3][0], skin_comp.matrices[@intCast(parent)][3][1], skin_comp.matrices[@intCast(parent)][3][2] };
+                const b: @Vector(3, f32) = .{ skin_comp.matrices[i][3][0], skin_comp.matrices[i][3][1], skin_comp.matrices[i][3][2] };
+                renderer.ddLine(a, b, .{ 1.0, 1.0, 0.0 });
+            }
+        }
     }
 
     fn uploadPendingTextures(self: *RenderSystemState, registry: *Registry) !void {

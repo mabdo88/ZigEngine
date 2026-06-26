@@ -4,6 +4,7 @@ const compstrg = @import("componentStorage.zig");
 const components = @import("../components/components.zig");
 const event = @import("../event.zig");
 const meshCache = @import("../../../resources/meshCache.zig");
+const animCache = @import("../../../animation/anim_cache.zig");
 const log = @import("../../log.zig");
 const Timer = @import("../../timer.zig").Timer;
 
@@ -24,6 +25,8 @@ pub const Registry = struct {
     storage: StorageType() = undefined,
     events: event.EventBus = undefined,
     mesh_cache: meshCache.MeshCache = undefined,
+    skeleton_cache: animCache.SkeletonCache = undefined,
+    clip_cache: animCache.ClipCache = undefined,
 
     pub fn init(allocator: std.mem.Allocator) Registry {
         log.info(@src(), "Initializing Registry", .{});
@@ -32,6 +35,8 @@ pub const Registry = struct {
         self.MAX_ENTITIES = 1_000_000;
         self.events = event.EventBus.init(allocator);
         self.mesh_cache = meshCache.MeshCache.init(allocator);
+        self.skeleton_cache = animCache.SkeletonCache.init(allocator);
+        self.clip_cache = animCache.ClipCache.init(allocator);
         inline for (0..self.storage.len) |i| {
             self.storage[i] = .{};
         }
@@ -57,6 +62,8 @@ pub const Registry = struct {
         self.component_masks.deinit(self.registry_allocator);
         self.events.deinit();
         self.mesh_cache.deinit();
+        self.skeleton_cache.deinit();
+        self.clip_cache.deinit();
 
         log.info(@src(), "Registry Offline", .{});
     }

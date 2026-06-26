@@ -2,6 +2,12 @@ const std = @import("std");
 const math = @import("../engine/math.zig");
 const clip = @import("clip.zig");
 
+/// Upper bound used by callers that want a stack-allocated scratch buffer
+/// (e.g. AnimPlayerSystem's per-frame local-matrix conversion) instead of
+/// allocating one per entity per frame. Cesium Man has ~19 joints; this
+/// leaves generous headroom for a typical humanoid rig.
+pub const MAX_JOINTS: usize = 128;
+
 /// Joint hierarchy + bind-pose data for one skinned mesh. `parent_indices[i]`
 /// is always < i (the loader topologically sorts joints on import) so
 /// `computeSkinMatrices` can do a single forward sweep instead of recursing.

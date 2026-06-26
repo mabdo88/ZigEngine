@@ -13,11 +13,17 @@ const MeshCache = @import("../../../resources/meshCache.zig").MeshCache;
 const math = @import("../../math.zig");
 const shared_state = @import("shared_state.zig");
 const log = @import("../../log.zig");
+const clip_mod = @import("../../../animation/clip.zig");
 
 pub const PreloadedScene = struct {
     primitives: []meshLoader.ScenePrimitive,
     mesh_ids: []u32,
     material_indices: []u32,
+    /// Set when the source asset had a skin (and, for clip_id, an
+    /// animation) — only `skeletons[0]`/`animation_clips[0]` are used, since
+    /// every asset checked so far has at most one skin (see meshLoader.zig).
+    skeleton_id: ?u32 = null,
+    clip_id: ?u32 = null,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *PreloadedScene) void {
@@ -131,10 +137,14 @@ pub const SceneSystemState = struct {
                 const primitives = try allocator.dupe(meshLoader.ScenePrimitive, gltf.primitives);
                 errdefer allocator.free(primitives);
 
+                const skeleton_id, const clip_id = try registerSkeletonAndClip(registry, gltf);
+
                 self.preloaded[i] = .{
                     .primitives = primitives,
                     .mesh_ids = ps.mesh_ids,
                     .material_indices = material_indices,
+                    .skeleton_id = skeleton_id,
+                    .clip_id = clip_id,
                     .allocator = allocator,
                 };
 
@@ -231,6 +241,23 @@ pub const SceneSystemState = struct {
             try registry.add(entity, components.MaterialComponent{ .material_index = material_index });
 
             try registry.add(entity, components.SceneOwnedComponent{ .owner = scene_entity });
+
+            // Attaches to every primitive in the scene, not just the one(s)
+            // actually skinned — fine while every asset checked so far has
+            // exactly one skin and one mesh; see PreloadedScene's doc comment.
+            if (preloaded.skeleton_id) |skeleton_id| {
+                try registry.add(entity, components.SkeletonComponent{ .skeleton_id = skeleton_id });
+                const sk = registry.skeleton_cache.get(skeleton_id).?;
+                try registry.add(entity, components.PoseBufferComponent{
+                    .poses = try sk.bindPoseTRS(registry.registry_allocator),
+                });
+                try registry.add(entity, components.SkinMatricesComponent{
+                    .matrices = try registry.registry_allocator.alloc([4][4]f32, sk.joint_count),
+                });
+                if (preloaded.clip_id) |clip_id| {
+                    try registry.add(entity, components.AnimPlayerComponent{ .clip_id = clip_id });
+                }
+            }
         }
 
         var cam_it = registry.Query(.{components.CameraComponent});
@@ -334,6 +361,19 @@ pub fn destroy(allocator: std.mem.Allocator, _: *Registry, ctx: *anyopaque) void
     allocator.destroy(state);
 }
 
+/// Registers the scene's skeleton/clip (if any) into the long-lived caches.
+/// Only `skeletons[0]`/`animation_clips[0]` are used — see PreloadedScene's
+/// skeleton_id/clip_id doc comment.
+fn registerSkeletonAndClip(registry: *Registry, gltf: *meshLoader.GltfScene) !struct { ?u32, ?u32 } {
+    if (gltf.skeletons.len == 0) return .{ null, null };
+    const skeleton_id = try registry.skeleton_cache.register(&gltf.skeletons[0]);
+    const clip_id = if (gltf.animation_clips.len > 0)
+        try registry.clip_cache.register(&gltf.animation_clips[0])
+    else
+        null;
+    return .{ skeleton_id, clip_id };
+}
+
 fn preloadSceneSync(state: *SceneSystemState, allocator: std.mem.Allocator, registry: *Registry, sc: *const config_mod.Config.SceneConfig, index: usize) !void {
     const scene_start = window.getTime();
 
@@ -370,10 +410,14 @@ fn preloadSceneSync(state: *SceneSystemState, allocator: std.mem.Allocator, regi
     const primitives = try allocator.dupe(meshLoader.ScenePrimitive, gltf.primitives);
     errdefer allocator.free(primitives);
 
+    const skeleton_id, const clip_id = try registerSkeletonAndClip(registry, &gltf);
+
     state.preloaded[index] = .{
         .primitives = primitives,
         .mesh_ids = mesh_ids,
         .material_indices = material_indices,
+        .skeleton_id = skeleton_id,
+        .clip_id = clip_id,
         .allocator = allocator,
     };
     state.preload_states[index].gpu_uploaded = true;

@@ -1,5 +1,6 @@
 const std = @import("std");
 const Entity = @import("../entity/entity.zig").Entity;
+const clip_mod = @import("../../../animation/clip.zig");
 
 pub fn ComponentBit(comptime T: type) u64 {
     inline for (AllComponents, 0..) |C, i| {
@@ -30,6 +31,10 @@ pub const AllComponents = .{
     TextureDataComponent,
     FinalTransformComponent,
     ParentComponent,
+    SkeletonComponent,
+    AnimPlayerComponent,
+    PoseBufferComponent,
+    SkinMatricesComponent,
 };
 
 pub const MeshComponent = struct {
@@ -116,5 +121,41 @@ pub const TextureDataComponent = struct {
 
     pub fn deinit(self: TextureDataComponent, allocator: std.mem.Allocator) void {
         if (self.pixels.len > 0) allocator.free(self.pixels);
+    }
+};
+
+/// Index into Registry.skeleton_cache — the skeleton itself is asset data
+/// shared across instances, not owned per-entity.
+pub const SkeletonComponent = struct {
+    skeleton_id: u32,
+};
+
+/// Index into Registry.clip_cache, plus per-entity playback state.
+pub const AnimPlayerComponent = struct {
+    clip_id: u32,
+    time: f32 = 0,
+    speed: f32 = 1.0,
+    loop: bool = true,
+};
+
+/// Per-entity local joint pose, sampled from the clip each frame by
+/// AnimPlayerSystem. Sized to the skeleton's joint_count at spawn time.
+pub const PoseBufferComponent = struct {
+    poses: []clip_mod.JointPose,
+
+    pub fn deinit(self: PoseBufferComponent, allocator: std.mem.Allocator) void {
+        allocator.free(self.poses);
+    }
+};
+
+/// Per-entity world-space joint transforms, recomputed each frame by
+/// AnimPlayerSystem from PoseBufferComponent. Named for its eventual GPU
+/// skinning role (skin[i] = world[i] * inverse_bind[i]) — for now it holds
+/// plain world transforms, since nothing samples inverse_bind into it yet.
+pub const SkinMatricesComponent = struct {
+    matrices: [][4][4]f32,
+
+    pub fn deinit(self: SkinMatricesComponent, allocator: std.mem.Allocator) void {
+        allocator.free(self.matrices);
     }
 };
