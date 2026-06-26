@@ -5,6 +5,7 @@ pub const EventType = enum {
     entity_destroyed,
     scene_unloaded,
     anim_event,
+    trigger_event,
 };
 
 pub const AnimEventPayload = struct {
@@ -15,10 +16,17 @@ pub const AnimEventPayload = struct {
     name: []const u8,
 };
 
+pub const TriggerEventPayload = struct {
+    trigger_ent: Entity,
+    other_ent: Entity,
+    is_enter: bool,
+};
+
 pub const EventPayload = union(EventType) {
     entity_destroyed: Entity,
     scene_unloaded: void,
     anim_event: AnimEventPayload,
+    trigger_event: TriggerEventPayload,
 };
 
 pub const Handler = struct {

@@ -24,4 +24,5 @@ pub fn main() !void {
 // as an explicit aggregator for the GPU-free test target.
 comptime {
     _ = @import("resources/meshLoader.zig");
+    _ = @import("engine/ecs/systems/physics_sync_system.zig");
 }

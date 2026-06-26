@@ -36,6 +36,9 @@ pub const AllComponents = .{
     PoseBufferComponent,
     JointWorldComponent,
     SkinPaletteComponent,
+    PhysicsBodyComponent,
+    CharacterControllerComponent,
+    TriggerWatcherComponent,
 };
 
 pub const MeshComponent = struct {
@@ -181,3 +184,32 @@ pub const SkinPaletteComponent = struct {
         allocator.free(self.matrices);
     }
 };
+
+/// A live Jolt rigid body. body_id is the BodyID Jolt handed back from
+/// jolt_add_box (an index+sequence pair packed into one u32, see BodyID in
+/// jolt_wrapper.cpp) — opaque to Zig beyond round-tripping it through the
+/// wrapper. is_static bodies are skipped by PhysicsSyncSystem's writeback
+/// (they never move, and Static motion type can't be activated anyway).
+/// Same caveat as CharacterControllerComponent: freeing the Jolt body needs
+/// the JoltCtx, which the generic component-deinit hook doesn't have access
+/// to — call physics_world.despawnBody() before destroying the entity.
+pub const PhysicsBodyComponent = struct {
+    body_id: u32,
+    is_static: bool,
+};
+
+/// A live Jolt CharacterVirtual, addressed by an opaque handle (not a
+/// BodyID — CharacterVirtual is a kinematic controller, not a rigid body,
+/// see character_controller.zig). Registry's generic component-deinit hook
+/// only gets an allocator, not the JoltCtx this handle needs to be freed
+/// through — so cleanup can't be automatic here. Callers must explicitly
+/// call character_controller.despawnCharacter() before destroying the
+/// entity, or the underlying CharacterVirtual leaks.
+pub const CharacterControllerComponent = struct {
+    handle: *anyopaque,
+};
+
+/// Marks an entity as a sensor (trigger) volume so TriggerSystem polls Jolt's
+/// trigger-event queue and re-emits it as TriggerEvent through the EventBus,
+/// resolving Jolt body IDs back to entities via PhysicsBodyComponent.
+pub const TriggerWatcherComponent = struct {};

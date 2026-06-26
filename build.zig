@@ -63,6 +63,34 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addIncludePath(b.path("deps/cgltf/"));
     exe.root_module.addIncludePath(b.path("deps/stb/"));
     exe.root_module.addIncludePath(b.path("deps/vma/"));
+
+    // Jolt Physics (deps/jolt, git submodule pinned to v5.5.0) — compiled directly
+    // from source, no CMake involved. We collect every Jolt/*.cpp ourselves since
+    // there's no Zig-native equivalent of Jolt.cmake's source list; files gated by
+    // undefined macros (e.g. Renderer/DebugRenderer*.cpp under JPH_DEBUG_RENDERER)
+    // compile to empty translation units when the macro is off, so including them
+    // unconditionally is harmless.
+    const jolt_cpp_flags = &[_][]const u8{"-std=c++17"};
+    {
+        const io = b.graph.io;
+        var dir = std.Io.Dir.cwd().openDir(io, "deps/jolt/Jolt", .{ .iterate = true }) catch @panic("deps/jolt submodule not found — run `git submodule update --init`");
+        defer dir.close(io);
+        var walker = dir.walk(b.allocator) catch @panic("OOM");
+        defer walker.deinit();
+        while (walker.next(io) catch @panic("walk failed")) |entry| {
+            if (entry.kind != .file) continue;
+            if (!std.mem.endsWith(u8, entry.basename, ".cpp")) continue;
+            const rel = b.fmt("deps/jolt/Jolt/{s}", .{entry.path});
+            exe.root_module.addCSourceFile(.{ .file = b.path(rel), .flags = jolt_cpp_flags, .language = .cpp });
+        }
+    }
+    exe.root_module.addCSourceFile(.{
+        .file = b.path("src/physics/jolt_wrapper.cpp"),
+        .flags = jolt_cpp_flags,
+        .language = .cpp,
+    });
+    exe.root_module.addIncludePath(b.path("deps/jolt/"));
+    exe.root_module.addIncludePath(b.path("src/physics/"));
     if (os_tag == .windows) {
         // Windows: vendored Vulkan SDK headers + Win32 + the Windows loader (vulkan-1).
         const vulkan_include = b.fmt("{s}/Include/", .{vulkan_sdk_path});
