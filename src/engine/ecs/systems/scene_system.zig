@@ -61,7 +61,7 @@ fn loadSceneFile(allocator: std.mem.Allocator, path: [:0]const u8) !meshLoader.G
         defer threaded.deinit();
         return objLoader.loadObjScene(threaded.io(), allocator, path);
     }
-    return meshLoader.loadgltf(allocator, path);
+    return meshLoader.loadGltf(allocator, path);
 }
 
 fn bgLoadThread(args: *BgLoadArgs) void {
