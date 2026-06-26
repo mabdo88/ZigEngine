@@ -38,12 +38,22 @@ pub const Skeleton = struct {
 };
 
 /// Forward kinematics pass: world[i] = world[parent(i)] * local[i] (root:
-/// world[i] = local[i]); skin[i] = world[i] * inverse_bind[i]. `world_scratch`
-/// and `out_skin` must each have at least `skeleton.joint_count` entries.
-pub fn computeSkinMatrices(skeleton: *const Skeleton, local_poses: []const [4][4]f32, world_scratch: [][4][4]f32, out_skin: [][4][4]f32) void {
+/// world[i] = local[i]). `out_world` must have at least `skeleton.joint_count`
+/// entries. Exposed on its own (not just inlined into computeSkinMatrices) so
+/// callers that only need joint positions — e.g. debug-drawing the skeleton —
+/// don't have to compute skin matrices they won't use.
+pub fn computeWorldTransforms(skeleton: *const Skeleton, local_poses: []const [4][4]f32, out_world: [][4][4]f32) void {
     for (0..skeleton.joint_count) |i| {
         const parent = skeleton.parent_indices[i];
-        world_scratch[i] = if (parent < 0) local_poses[i] else math.matMul(world_scratch[@intCast(parent)], local_poses[i]);
+        out_world[i] = if (parent < 0) local_poses[i] else math.matMul(out_world[@intCast(parent)], local_poses[i]);
+    }
+}
+
+/// skin[i] = world[i] * inverse_bind[i]. `world_scratch` and `out_skin` must
+/// each have at least `skeleton.joint_count` entries.
+pub fn computeSkinMatrices(skeleton: *const Skeleton, local_poses: []const [4][4]f32, world_scratch: [][4][4]f32, out_skin: [][4][4]f32) void {
+    computeWorldTransforms(skeleton, local_poses, world_scratch);
+    for (0..skeleton.joint_count) |i| {
         out_skin[i] = math.matMul(world_scratch[i], skeleton.inverse_bind_matrices[i]);
     }
 }
