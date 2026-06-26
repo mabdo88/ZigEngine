@@ -91,6 +91,17 @@ pub const ClipCache = struct {
             filled = i + 1;
         }
 
+        const events = try self.allocator.alloc(clip.AnimEvent, c.events.len);
+        var events_filled: usize = 0;
+        errdefer {
+            for (events[0..events_filled]) |e| self.allocator.free(e.name);
+            self.allocator.free(events);
+        }
+        for (c.events, 0..) |e, i| {
+            events[i] = .{ .time = e.time, .name = try self.allocator.dupe(u8, e.name) };
+            events_filled = i + 1;
+        }
+
         const name = try self.allocator.dupe(u8, c.name);
         errdefer self.allocator.free(name);
 
@@ -99,6 +110,7 @@ pub const ClipCache = struct {
             .name = name,
             .duration = c.duration,
             .channels = channels,
+            .events = events,
             .allocator = self.allocator,
         });
         return id;
@@ -158,6 +170,27 @@ test "ClipCache.register duplicates channels independent of the source" {
     try std.testing.expectEqualStrings("walk", cached.name);
     try std.testing.expectEqual(@as(f32, 1.5), cached.duration);
     try std.testing.expectEqual(@as(usize, 1), cached.channels.len);
+}
+
+test "ClipCache.register duplicates events independent of the source" {
+    const allocator = std.testing.allocator;
+    var cache = ClipCache.init(allocator);
+    defer cache.deinit();
+
+    var source = clip.AnimationClip{
+        .name = try allocator.dupe(u8, "walk"),
+        .duration = 1.0,
+        .channels = &.{},
+        .events = try allocator.dupe(clip.AnimEvent, &.{.{ .time = 0.5, .name = try allocator.dupe(u8, "footstep") }}),
+        .allocator = allocator,
+    };
+
+    const id = try cache.register(&source);
+    source.deinit();
+
+    const cached = cache.get(id).?;
+    try std.testing.expectEqual(@as(usize, 1), cached.events.len);
+    try std.testing.expectEqualStrings("footstep", cached.events[0].name);
 }
 
 test "get returns null for an out-of-range id" {

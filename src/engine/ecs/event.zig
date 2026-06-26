@@ -4,11 +4,21 @@ const Entity = @import("entity/entity.zig").Entity;
 pub const EventType = enum {
     entity_destroyed,
     scene_unloaded,
+    anim_event,
+};
+
+pub const AnimEventPayload = struct {
+    entity: Entity,
+    /// Points into the clip's own owned event name (Registry.clip_cache
+    /// outlives any single frame) — valid for the duration of this emit
+    /// call, not guaranteed to outlive it.
+    name: []const u8,
 };
 
 pub const EventPayload = union(EventType) {
     entity_destroyed: Entity,
     scene_unloaded: void,
+    anim_event: AnimEventPayload,
 };
 
 pub const Handler = struct {

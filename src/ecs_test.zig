@@ -47,5 +47,7 @@ comptime {
     _ = @import("animation/skeleton.zig");
     _ = @import("animation/clip.zig");
     _ = @import("animation/anim_cache.zig");
+    _ = @import("animation/blend_tree.zig");
+    _ = @import("animation/state_machine.zig");
     _ = @import("engine/ecs/systems/anim_player_system.zig");
 }

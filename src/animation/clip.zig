@@ -45,10 +45,19 @@ pub const Channel = struct {
     values: [][4]f32,
 };
 
+/// A named marker at a fixed point in a clip (footstep, hit frame, etc.).
+/// glTF has no native concept of this — clips loaded from glTF always have
+/// `events = &.{}`; gameplay code authors these programmatically.
+pub const AnimEvent = struct {
+    time: f32,
+    name: []u8,
+};
+
 pub const AnimationClip = struct {
     name: []u8,
     duration: f32,
     channels: []Channel,
+    events: []AnimEvent = &.{},
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *AnimationClip) void {
@@ -57,9 +66,43 @@ pub const AnimationClip = struct {
             self.allocator.free(c.values);
         }
         self.allocator.free(self.channels);
+        for (self.events) |e| self.allocator.free(e.name);
+        self.allocator.free(self.events);
         self.allocator.free(self.name);
     }
 };
+
+/// Invokes `callback(ctx, event)` for every event with `last_time < event.time
+/// <= new_time`. Handles one loop wraparound (new_time < last_time, as
+/// produced by `@mod`-wrapping playback time): fires events in
+/// `(last_time, duration]` then `[0, new_time]`. Does not handle more than
+/// one wraparound per call — fine at a fixed 1/60s step and reasonable
+/// playback speeds, where multiple full loops in a single frame won't happen.
+pub fn forEachFiredEvent(clip: *const AnimationClip, last_time: f32, new_time: f32, ctx: anytype, comptime callback: fn (@TypeOf(ctx), *const AnimEvent) void) void {
+    if (new_time < last_time) {
+        for (clip.events) |*e| {
+            if (e.time > last_time and e.time <= clip.duration) callback(ctx, e);
+        }
+        for (clip.events) |*e| {
+            if (e.time >= 0 and e.time <= new_time) callback(ctx, e);
+        }
+        return;
+    }
+    for (clip.events) |*e| {
+        if (e.time > last_time and e.time <= new_time) callback(ctx, e);
+    }
+}
+
+/// Blends two already-sampled poses (e.g. for a 1D blend tree or an ASM
+/// transition) — lerp for translation/scale, slerp for rotation, joint by
+/// joint. `a`, `b`, and `out` must all be the same length.
+pub fn blendPoses(a: []const JointPose, b: []const JointPose, alpha: f32, out: []JointPose) void {
+    for (a, b, out) |pa, pb, *po| {
+        po.translation = lerpVec3(.{ pa.translation[0], pa.translation[1], pa.translation[2], 0 }, .{ pb.translation[0], pb.translation[1], pb.translation[2], 0 }, alpha);
+        po.rotation = slerpQuat(pa.rotation, pb.rotation, alpha);
+        po.scale = lerpVec3(.{ pa.scale[0], pa.scale[1], pa.scale[2], 0 }, .{ pb.scale[0], pb.scale[1], pb.scale[2], 0 }, alpha);
+    }
+}
 
 fn lerp(a: f32, b: f32, t: f32) f32 {
     return a + (b - a) * t;
@@ -184,4 +227,81 @@ test "sampleClip: a rotation channel slerps and leaves an unanimated joint at re
     try std.testing.expectApproxEqAbs(@as(f32, 0.70710678), poses[0].rotation[3], 1e-4);
     // Joint 1 has no channel targeting it — must remain exactly at the rest pose passed in.
     try std.testing.expectEqual(@as(f32, 7.0), poses[1].translation[0]);
+}
+
+fn makeEventClip(allocator: std.mem.Allocator) !AnimationClip {
+    var events = try allocator.alloc(AnimEvent, 2);
+    events[0] = .{ .time = 0.25, .name = try allocator.dupe(u8, "footstep_l") };
+    events[1] = .{ .time = 0.75, .name = try allocator.dupe(u8, "footstep_r") };
+    return AnimationClip{ .name = try allocator.dupe(u8, "walk"), .duration = 1.0, .channels = &.{}, .events = events, .allocator = allocator };
+}
+
+test "forEachFiredEvent: fires events strictly within (last_time, new_time]" {
+    const allocator = std.testing.allocator;
+    var clip = try makeEventClip(allocator);
+    defer clip.deinit();
+
+    var fired: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer fired.deinit(allocator);
+    forEachFiredEvent(&clip, 0.0, 0.5, &fired, struct {
+        fn cb(ctx: *std.ArrayListUnmanaged([]const u8), e: *const AnimEvent) void {
+            ctx.append(std.testing.allocator, e.name) catch {};
+        }
+    }.cb);
+
+    try std.testing.expectEqual(@as(usize, 1), fired.items.len);
+    try std.testing.expectEqualStrings("footstep_l", fired.items[0]);
+}
+
+test "forEachFiredEvent: an event exactly at last_time does not refire" {
+    const allocator = std.testing.allocator;
+    var clip = try makeEventClip(allocator);
+    defer clip.deinit();
+
+    var fired: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer fired.deinit(allocator);
+    forEachFiredEvent(&clip, 0.25, 0.6, &fired, struct {
+        fn cb(ctx: *std.ArrayListUnmanaged([]const u8), e: *const AnimEvent) void {
+            ctx.append(std.testing.allocator, e.name) catch {};
+        }
+    }.cb);
+
+    try std.testing.expectEqual(@as(usize, 0), fired.items.len);
+}
+
+test "forEachFiredEvent: handles loop wraparound, firing the tail then the head" {
+    const allocator = std.testing.allocator;
+    var clip = try makeEventClip(allocator);
+    defer clip.deinit();
+
+    var fired: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer fired.deinit(allocator);
+    // last_time=0.6 (past footstep_r at 0.75? no, 0.6 < 0.75) wraps to new_time=0.3:
+    // fires footstep_r (0.75, in the tail) then footstep_l (0.25, in the head).
+    forEachFiredEvent(&clip, 0.6, 0.3, &fired, struct {
+        fn cb(ctx: *std.ArrayListUnmanaged([]const u8), e: *const AnimEvent) void {
+            ctx.append(std.testing.allocator, e.name) catch {};
+        }
+    }.cb);
+
+    try std.testing.expectEqual(@as(usize, 2), fired.items.len);
+    try std.testing.expectEqualStrings("footstep_r", fired.items[0]);
+    try std.testing.expectEqualStrings("footstep_l", fired.items[1]);
+}
+
+test "blendPoses: lerps translation and slerps rotation between two poses" {
+    const a = [_]JointPose{.{ .translation = .{ 0, 0, 0 } }};
+    const b = [_]JointPose{.{ .translation = .{ 10, 0, 0 }, .rotation = .{ 0, 0, 1, 0 } }};
+    var out = [_]JointPose{.{}};
+
+    blendPoses(&a, &b, 0.5, &out);
+    try std.testing.expectApproxEqAbs(@as(f32, 5.0), out[0].translation[0], 1e-5);
+    // Halfway through a 0->180deg slerp around Z is 90deg.
+    try std.testing.expectApproxEqAbs(@as(f32, 0.70710678), out[0].rotation[2], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.70710678), out[0].rotation[3], 1e-4);
+
+    blendPoses(&a, &b, 0.0, &out);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), out[0].translation[0], 1e-5);
+    blendPoses(&a, &b, 1.0, &out);
+    try std.testing.expectApproxEqAbs(@as(f32, 10.0), out[0].translation[0], 1e-5);
 }
