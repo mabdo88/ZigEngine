@@ -6,6 +6,7 @@ const components = @import("../engine/ecs/components/components.zig");
 const math = @import("../engine/math.zig");
 const log = @import("../engine/log.zig");
 const skeleton = @import("../animation/skeleton.zig");
+const clip = @import("../animation/clip.zig");
 
 pub const MeshData = struct {
     vertices: []components.Vertex,
@@ -74,6 +75,10 @@ pub const GltfScene = struct {
     materials: []MaterialData,
     primitives: []ScenePrimitive,
     skeletons: []skeleton.Skeleton = &.{},
+    /// Clips found while parsing `skeletons[0]`'s skin — there's no
+    /// per-skeleton association yet since every asset checked so far has at
+    /// most one skin; revisit if a multi-skin asset needs it.
+    animation_clips: []clip.AnimationClip = &.{},
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *GltfScene) void {
@@ -89,14 +94,24 @@ pub const GltfScene = struct {
         self.allocator.free(self.primitives);
         for (self.skeletons) |*sk| sk.deinit();
         self.allocator.free(self.skeletons);
+        for (self.animation_clips) |*c| c.deinit();
+        self.allocator.free(self.animation_clips);
     }
+};
+
+const SkinResult = struct {
+    skeleton: skeleton.Skeleton,
+    /// Joint node pointers in the same topological order as the skeleton's
+    /// arrays — kept only long enough to map animation channels' target
+    /// nodes onto skeleton joint indices, then freed by the caller.
+    joint_nodes: [][*c]gltf.cgltf_node,
 };
 
 /// Builds a runtime `Skeleton` from a cgltf skin: remaps joints into
 /// topological order (parent_indices[i] < i for every i) so
 /// `computeSkinMatrices` can do a single forward sweep, since cgltf doesn't
 /// guarantee the skin's joint array is already in that order.
-fn loadSkin(allocator: std.mem.Allocator, skin: *gltf.cgltf_skin) !skeleton.Skeleton {
+fn loadSkin(allocator: std.mem.Allocator, skin: *gltf.cgltf_skin) !SkinResult {
     const n = skin.joints_count;
     if (n == 0) return error.gltfEmptySkin;
 
@@ -131,6 +146,10 @@ fn loadSkin(allocator: std.mem.Allocator, skin: *gltf.cgltf_skin) !skeleton.Skel
     errdefer allocator.free(inverse_bind);
     const rest_local = try allocator.alloc([4][4]f32, n);
     errdefer allocator.free(rest_local);
+    const rest_poses = try allocator.alloc(clip.JointPose, n);
+    errdefer allocator.free(rest_poses);
+    const joint_nodes = try allocator.alloc([*c]gltf.cgltf_node, n);
+    errdefer allocator.free(joint_nodes);
 
     for (order.items, 0..) |old_i, new_i| {
         const p_old = raw_parent[old_i];
@@ -144,15 +163,98 @@ fn loadSkin(allocator: std.mem.Allocator, skin: *gltf.cgltf_skin) !skeleton.Skel
         }
         inverse_bind[new_i] = ibm;
 
-        const joint_view = NodeView{ .node = @ptrCast(skin.joints[old_i]) };
+        const node_ptr = skin.joints[old_i];
+        joint_nodes[new_i] = node_ptr;
+        const joint_view = NodeView{ .node = @ptrCast(node_ptr) };
         rest_local[new_i] = joint_view.localTransform();
+
+        // Matrix-encoded joint nodes aren't decomposed into TRS — animation
+        // channels can't target them correctly, so they're left at identity.
+        // Every channel we've seen in practice (and Cesium Man specifically)
+        // uses separate translation/rotation/scale, not has_matrix.
+        var pose: clip.JointPose = .{};
+        if (node_ptr.*.has_matrix == 0) {
+            if (node_ptr.*.has_translation != 0) pose.translation = node_ptr.*.translation;
+            if (node_ptr.*.has_rotation != 0) pose.rotation = node_ptr.*.rotation;
+            if (node_ptr.*.has_scale != 0) pose.scale = node_ptr.*.scale;
+        }
+        rest_poses[new_i] = pose;
     }
 
-    return skeleton.Skeleton{
-        .joint_count = @intCast(n),
-        .parent_indices = parent_indices,
-        .inverse_bind_matrices = inverse_bind,
-        .rest_local_transforms = rest_local,
+    return SkinResult{
+        .skeleton = skeleton.Skeleton{
+            .joint_count = @intCast(n),
+            .parent_indices = parent_indices,
+            .inverse_bind_matrices = inverse_bind,
+            .rest_local_transforms = rest_local,
+            .rest_local_poses = rest_poses,
+            .allocator = allocator,
+        },
+        .joint_nodes = joint_nodes,
+    };
+}
+
+/// Maps a cgltf animation's channels onto skeleton joint indices via
+/// `joint_node_to_index`. Returns null if none of the animation's channels
+/// target a joint in this skeleton (e.g. a morph-target or camera
+/// animation) — only LINEAR/STEP interpolation is supported (sufficient for
+/// every glTF sample asset checked so far; CUBICSPLINE would need tangent
+/// data this doesn't read).
+fn loadAnimationClip(allocator: std.mem.Allocator, anim: *gltf.cgltf_animation, joint_node_to_index: *const std.AutoHashMap(usize, u32)) !?clip.AnimationClip {
+    var channel_list: std.ArrayListUnmanaged(clip.Channel) = .empty;
+    errdefer {
+        for (channel_list.items) |c| {
+            allocator.free(c.times);
+            allocator.free(c.values);
+        }
+        channel_list.deinit(allocator);
+    }
+
+    var duration: f32 = 0;
+    for (0..anim.channels_count) |ci| {
+        const ch = anim.channels[ci];
+        if (ch.target_node == null) continue;
+        const joint_index = joint_node_to_index.get(@intFromPtr(ch.target_node)) orelse continue;
+        if (ch.sampler.*.interpolation == gltf.cgltf_interpolation_type_cubic_spline) {
+            log.warn(@src(), "loadAnimationClip: skipping CUBICSPLINE channel (unsupported)", .{});
+            continue;
+        }
+        const path: clip.ChannelPath = switch (ch.target_path) {
+            gltf.cgltf_animation_path_type_translation => .translation,
+            gltf.cgltf_animation_path_type_rotation => .rotation,
+            gltf.cgltf_animation_path_type_scale => .scale,
+            else => continue,
+        };
+        const element_size: usize = if (path == .rotation) 4 else 3;
+
+        const keyframe_count = ch.sampler.*.input.*.count;
+        const times = try allocator.alloc(f32, keyframe_count);
+        errdefer allocator.free(times);
+        const values = try allocator.alloc([4]f32, keyframe_count);
+        errdefer allocator.free(values);
+        for (0..keyframe_count) |ki| {
+            var t: f32 = 0;
+            _ = gltf.cgltf_accessor_read_float(ch.sampler.*.input, ki, &t, 1);
+            times[ki] = t;
+            duration = @max(duration, t);
+
+            var v: [4]f32 = .{ 0, 0, 0, 1 };
+            _ = gltf.cgltf_accessor_read_float(ch.sampler.*.output, ki, &v, element_size);
+            values[ki] = v;
+        }
+        try channel_list.append(allocator, .{ .joint_index = joint_index, .path = path, .times = times, .values = values });
+    }
+
+    if (channel_list.items.len == 0) {
+        channel_list.deinit(allocator);
+        return null;
+    }
+
+    const name = if (anim.name != null) try allocator.dupe(u8, std.mem.sliceTo(anim.name, 0)) else try allocator.dupe(u8, "");
+    return clip.AnimationClip{
+        .name = name,
+        .duration = duration,
+        .channels = try channel_list.toOwnedSlice(allocator),
         .allocator = allocator,
     };
 }
@@ -350,13 +452,32 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
         for (skel_list.items) |*sk| sk.deinit();
         skel_list.deinit(allocator);
     }
+    var clip_list: std.ArrayListUnmanaged(clip.AnimationClip) = .empty;
+    errdefer {
+        for (clip_list.items) |*c| c.deinit();
+        clip_list.deinit(allocator);
+    }
     for (0..data.*.skins_count) |si| {
-        const sk = try loadSkin(allocator, @ptrCast(&data.*.skins[si]));
-        try skel_list.append(allocator, sk);
+        var skin_result = try loadSkin(allocator, @ptrCast(&data.*.skins[si]));
+        errdefer skin_result.skeleton.deinit();
+        defer allocator.free(skin_result.joint_nodes);
+        try skel_list.append(allocator, skin_result.skeleton);
+
+        if (si == 0) {
+            var joint_node_to_index = std.AutoHashMap(usize, u32).init(allocator);
+            defer joint_node_to_index.deinit();
+            for (skin_result.joint_nodes, 0..) |node_ptr, idx| try joint_node_to_index.put(@intFromPtr(node_ptr), @intCast(idx));
+
+            for (0..data.*.animations_count) |ai| {
+                if (try loadAnimationClip(allocator, @ptrCast(&data.*.animations[ai]), &joint_node_to_index)) |c| {
+                    try clip_list.append(allocator, c);
+                }
+            }
+        }
     }
 
-    log.info(@src(), "loadgltf: {d} mesh(es), {d} material(s), {d} primitive(s), {d} skeleton(s)", .{
-        mesh_list.items.len, mat_list.items.len, prim_list.items.len, skel_list.items.len,
+    log.info(@src(), "loadgltf: {d} mesh(es), {d} material(s), {d} primitive(s), {d} skeleton(s), {d} animation(s)", .{
+        mesh_list.items.len, mat_list.items.len, prim_list.items.len, skel_list.items.len, clip_list.items.len,
     });
 
     return GltfScene{
@@ -364,6 +485,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
         .materials = try mat_list.toOwnedSlice(allocator),
         .primitives = try prim_list.toOwnedSlice(allocator),
         .skeletons = try skel_list.toOwnedSlice(allocator),
+        .animation_clips = try clip_list.toOwnedSlice(allocator),
         .allocator = allocator,
     };
 }
@@ -381,6 +503,25 @@ test "loadgltf: a real skinned asset (Cesium Man) parses one topologically-sorte
         try std.testing.expect(sk.parent_indices[i] >= 0);
         try std.testing.expect(sk.parent_indices[i] < @as(i32, @intCast(i)));
     }
+
+    try std.testing.expectEqual(@as(usize, 1), scene.animation_clips.len);
+    const c = scene.animation_clips[0];
+    try std.testing.expect(c.duration > 0);
+    try std.testing.expect(c.channels.len > 0);
+
+    const allocator2 = std.testing.allocator;
+    const pose_start = try sk.bindPoseTRS(allocator2);
+    defer allocator2.free(pose_start);
+    const pose_mid = try sk.bindPoseTRS(allocator2);
+    defer allocator2.free(pose_mid);
+    clip.sampleClip(&c, 0.0, pose_start);
+    clip.sampleClip(&c, c.duration / 2.0, pose_mid);
+
+    var any_different = false;
+    for (pose_start, pose_mid) |a, b| {
+        if (!std.meta.eql(a, b)) any_different = true;
+    }
+    try std.testing.expect(any_different);
 }
 
 fn nodeWorldTransform(node: *gltf.cgltf_node) [4][4]f32 {

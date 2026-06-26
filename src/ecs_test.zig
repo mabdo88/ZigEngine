@@ -45,4 +45,5 @@ comptime {
     _ = @import("resources/meshCache.zig");
     // Skeletal animation
     _ = @import("animation/skeleton.zig");
+    _ = @import("animation/clip.zig");
 }

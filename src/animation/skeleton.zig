@@ -1,5 +1,6 @@
 const std = @import("std");
 const math = @import("../engine/math.zig");
+const clip = @import("clip.zig");
 
 /// Joint hierarchy + bind-pose data for one skinned mesh. `parent_indices[i]`
 /// is always < i (the loader topologically sorts joints on import) so
@@ -9,12 +10,17 @@ pub const Skeleton = struct {
     parent_indices: []i32, // -1 = root
     inverse_bind_matrices: [][4][4]f32,
     rest_local_transforms: [][4][4]f32,
+    /// Same rest pose as `rest_local_transforms`, decomposed into TRS so
+    /// AnimPlayer can overwrite individual components (a matrix can't be
+    /// partially overwritten the way a translation-only channel needs).
+    rest_local_poses: []clip.JointPose = &.{},
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *Skeleton) void {
         self.allocator.free(self.parent_indices);
         self.allocator.free(self.inverse_bind_matrices);
         self.allocator.free(self.rest_local_transforms);
+        self.allocator.free(self.rest_local_poses);
     }
 
     /// A fresh local-pose buffer initialized to the skeleton's rest pose —
@@ -22,6 +28,12 @@ pub const Skeleton = struct {
     /// not reproduce the bind pose (rest_local_transforms already encode it).
     pub fn bindPose(self: *const Skeleton, allocator: std.mem.Allocator) ![][4][4]f32 {
         return allocator.dupe([4][4]f32, self.rest_local_transforms);
+    }
+
+    /// TRS variant of `bindPose`, for use as the starting buffer passed to
+    /// `clip.sampleClip`.
+    pub fn bindPoseTRS(self: *const Skeleton, allocator: std.mem.Allocator) ![]clip.JointPose {
+        return allocator.dupe(clip.JointPose, self.rest_local_poses);
     }
 };
 
