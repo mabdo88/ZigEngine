@@ -1,6 +1,7 @@
 const std = @import("std");
 const Entity = @import("../entity/entity.zig").Entity;
 const clip_mod = @import("../../../animation/clip.zig");
+const Uuid = @import("../../uuid.zig").Uuid;
 
 pub fn ComponentBit(comptime T: type) u64 {
     inline for (AllComponents, 0..) |C, i| {
@@ -39,6 +40,10 @@ pub const AllComponents = .{
     PhysicsBodyComponent,
     CharacterControllerComponent,
     TriggerWatcherComponent,
+    UuidComponent,
+    PrefabInstanceComponent,
+    SpawnPointComponent,
+    SpawnedByComponent,
 };
 
 pub const MeshComponent = struct {
@@ -213,3 +218,44 @@ pub const CharacterControllerComponent = struct {
 /// trigger-event queue and re-emits it as TriggerEvent through the EventBus,
 /// resolving Jolt body IDs back to entities via PhysicsBodyComponent.
 pub const TriggerWatcherComponent = struct {};
+
+/// Stable cross-session identity. Attached to any entity that scene save/load
+/// needs to reference by identity rather than by transient {index, generation}
+/// (which gets reassigned every run) — prefab instances and spawn points.
+/// Entities spawned purely by the static glTF/OBJ scene pipeline don't need
+/// one: SceneSystem reconstructs them deterministically from the scene file
+/// on every load, so there's nothing to look up by id.
+pub const UuidComponent = struct {
+    id: Uuid,
+};
+
+/// Marks the root entity of a prefab instance and records which prefab
+/// spawned it, by index into prefab.PrefabRegistry.defs (not by name — POD
+/// components don't own strings, see CLAUDE.md's "Component data is POD"
+/// rule). scene_save.zig resolves this back to a name via
+/// PrefabRegistry.nameById() for the save file; scene_load.zig/spawner.zig
+/// resolve a saved name back to an id via PrefabRegistry.idByName() before
+/// re-instantiating.
+pub const PrefabInstanceComponent = struct {
+    prefab_id: u32,
+};
+
+/// A point in the world that periodically instantiates a prefab, up to
+/// max_active concurrently-alive instances. timer accumulates dt in
+/// spawner.zig's SpawnerSystem; active_count is decremented by that same
+/// system's entity_destroyed handler when a SpawnedByComponent-tagged
+/// instance dies, so it never needs to scan the registry to recount.
+pub const SpawnPointComponent = struct {
+    prefab_id: u32,
+    cooldown: f32,
+    max_active: u32,
+    active_count: u32 = 0,
+    timer: f32 = 0,
+};
+
+/// Marks a prefab instance as having been spawned by `spawner`, so
+/// SpawnerSystem's death observer knows which SpawnPointComponent.active_count
+/// to decrement when this entity is destroyed.
+pub const SpawnedByComponent = struct {
+    spawner: Entity,
+};

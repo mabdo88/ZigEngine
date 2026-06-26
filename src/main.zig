@@ -25,4 +25,8 @@ pub fn main() !void {
 comptime {
     _ = @import("resources/meshLoader.zig");
     _ = @import("engine/ecs/systems/physics_sync_system.zig");
+    _ = @import("scene/prefab.zig");
+    _ = @import("scene/scene_save.zig");
+    _ = @import("scene/scene_load.zig");
+    _ = @import("scene/spawner.zig");
 }
