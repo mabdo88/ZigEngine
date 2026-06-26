@@ -6,6 +6,10 @@ pub const SystemCreateCtx = struct {
     allocator: std.mem.Allocator,
     registry: *Registry,
     config: *const Config,
+    /// Per-frame scratch arena, reset at the top of every World.update().
+    /// Systems may stash this pointer during create() if they want scratch
+    /// allocations later; nothing currently requires it.
+    scratch: *std.heap.ArenaAllocator,
 };
 
 pub const SystemDesc = struct {
@@ -117,10 +121,13 @@ test "SystemManager sorts create_order descending and update_order ascending" {
     };
 
     var config = Config{};
+    var scratch_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer scratch_arena.deinit();
     var create_ctx = SystemCreateCtx{
         .allocator = std.testing.allocator,
         .registry = &reg,
         .config = &config,
+        .scratch = &scratch_arena,
     };
 
     var manager = try SystemManager.init(std.testing.allocator, &descs, &create_ctx);
@@ -153,10 +160,13 @@ test "update calls systems in ascending priority order" {
     };
 
     var config = Config{};
+    var scratch_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer scratch_arena.deinit();
     var create_ctx = SystemCreateCtx{
         .allocator = std.testing.allocator,
         .registry = &reg,
         .config = &config,
+        .scratch = &scratch_arena,
     };
 
     var manager = try SystemManager.init(std.testing.allocator, &descs, &create_ctx);
@@ -203,10 +213,13 @@ test "deinit calls destroy_fn in reverse create order" {
     };
 
     var config = Config{};
+    var scratch_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer scratch_arena.deinit();
     var create_ctx = SystemCreateCtx{
         .allocator = std.testing.allocator,
         .registry = &reg,
         .config = &config,
+        .scratch = &scratch_arena,
     };
 
     var manager = try SystemManager.init(std.testing.allocator, &descs, &create_ctx);

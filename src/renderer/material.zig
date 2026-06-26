@@ -11,31 +11,52 @@ pub fn createDefaultTexture(ctx: *zvkw.VulkanContext) !void {
     _ = try uploadTexture(ctx, &white, 1, 1);
 }
 
-pub fn resetTextures(ctx: *zvkw.VulkanContext) void {
-    _ = zvkw.zvk.vkDeviceWaitIdle(ctx.m_Device);
-    var i: u32 = 1;
-    while (i < ctx.textureCount) : (i += 1) {
-        zvkw.zvk.vkDestroyImageView(ctx.m_Device, ctx.textureSlots[i].view, null);
-        zvkw.vma.vmaDestroyImage(ctx.vmaAllocator, @ptrCast(ctx.textureSlots[i].image), ctx.textureSlots[i].allocation);
-        ctx.textureSlots[i] = .{};
-    }
-    ctx.textureCount = if (ctx.textureCount > 0) 1 else 0;
+pub fn createMaterialBuffer(ctx: *zvkw.VulkanContext) !void {
+    const bufferCI = zvkw.zvk.VkBufferCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = @sizeOf(zvkw.MaterialGpuData) * zvkw.MAX_MATERIALS,
+        .usage = zvkw.zvk.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    };
+    const allocCI = zvkw.vma.VmaAllocationCreateInfo{
+        .flags = zvkw.vma.VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
+            zvkw.vma.VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        .usage = zvkw.vma.VMA_MEMORY_USAGE_AUTO,
+    };
+    var allocInfo: zvkw.vma.VmaAllocationInfo = undefined;
+    try check(zvkw.vma.vmaCreateBuffer(ctx.vmaAllocator, @ptrCast(&bufferCI), &allocCI, @ptrCast(&ctx.materialBuffer), &ctx.materialBufferAllocation, &allocInfo));
+    ctx.materialBufferMapped = @ptrCast(@alignCast(allocInfo.pMappedData.?));
+
+    // Material 0: default, matches the default white texture (slot 0).
+    _ = try registerMaterial(ctx, 0.0, 1.0, 0);
+}
+
+pub fn destroyMaterialBuffer(ctx: *zvkw.VulkanContext) void {
+    zvkw.vma.vmaDestroyBuffer(ctx.vmaAllocator, @ptrCast(ctx.materialBuffer), ctx.materialBufferAllocation);
+}
+
+pub fn registerMaterial(ctx: *zvkw.VulkanContext, metallic: f32, roughness: f32, albedo_texture_index: zvkw.TextureHandle) !zvkw.MaterialHandle {
+    if (ctx.materialCount >= zvkw.MAX_MATERIALS) return error.MaterialHeapFull;
+    const slot = ctx.materialCount;
+    ctx.materialBufferMapped.?[slot] = .{ .metallic = metallic, .roughness = roughness, .albedo_texture_index = albedo_texture_index };
+    ctx.materialCount += 1;
+    return slot;
 }
 
 pub fn uploadTextureBatched(ctx: *zvkw.VulkanContext, batch: *upload.UploadBatch, pixels: []const u8, width: u32, height: u32) !zvkw.TextureHandle {
     const slot = ctx.textureCount;
     if (slot >= zvkw.MAX_TEXTURES) return error.TextureHeapFull;
 
+    const mip_levels = upload.mipLevelsForSize(width, height);
     const imageCI = zvkw.zvk.VkImageCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = zvkw.zvk.VK_IMAGE_TYPE_2D,
         .format = zvkw.zvk.VK_FORMAT_R8G8B8A8_SRGB,
         .extent = .{ .width = width, .height = height, .depth = 1 },
-        .mipLevels = 1,
+        .mipLevels = mip_levels,
         .arrayLayers = 1,
         .samples = zvkw.zvk.VK_SAMPLE_COUNT_1_BIT,
         .tiling = zvkw.zvk.VK_IMAGE_TILING_OPTIMAL,
-        .usage = zvkw.zvk.VK_IMAGE_USAGE_TRANSFER_DST_BIT | zvkw.zvk.VK_IMAGE_USAGE_SAMPLED_BIT,
+        .usage = zvkw.zvk.VK_IMAGE_USAGE_TRANSFER_SRC_BIT | zvkw.zvk.VK_IMAGE_USAGE_TRANSFER_DST_BIT | zvkw.zvk.VK_IMAGE_USAGE_SAMPLED_BIT,
         .initialLayout = zvkw.zvk.VK_IMAGE_LAYOUT_UNDEFINED,
     };
     const imageAllocCI = zvkw.vma.VmaAllocationCreateInfo{
@@ -54,7 +75,7 @@ pub fn uploadTextureBatched(ctx: *zvkw.VulkanContext, batch: *upload.UploadBatch
         .subresourceRange = .{
             .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
-            .levelCount = 1,
+            .levelCount = mip_levels,
             .baseArrayLayer = 0,
             .layerCount = 1,
         },
@@ -83,6 +104,7 @@ pub fn uploadTexture(ctx: *zvkw.VulkanContext, pixels: []const u8, width: u32, h
     const slot = ctx.textureCount;
     if (slot >= zvkw.MAX_TEXTURES) return error.TextureHeapFull;
     const imageSize: zvkw.zvk.VkDeviceSize = width * height * 4;
+    const mip_levels = upload.mipLevelsForSize(width, height);
 
     const staging = try upload.createStagingBuffer(ctx, imageSize);
     defer zvkw.vma.vmaDestroyBuffer(ctx.vmaAllocator, @ptrCast(staging.buffer), staging.allocation);
@@ -94,11 +116,11 @@ pub fn uploadTexture(ctx: *zvkw.VulkanContext, pixels: []const u8, width: u32, h
         .imageType = zvkw.zvk.VK_IMAGE_TYPE_2D,
         .format = zvkw.zvk.VK_FORMAT_R8G8B8A8_SRGB,
         .extent = .{ .width = width, .height = height, .depth = 1 },
-        .mipLevels = 1,
+        .mipLevels = mip_levels,
         .arrayLayers = 1,
         .samples = zvkw.zvk.VK_SAMPLE_COUNT_1_BIT,
         .tiling = zvkw.zvk.VK_IMAGE_TILING_OPTIMAL,
-        .usage = zvkw.zvk.VK_IMAGE_USAGE_TRANSFER_DST_BIT | zvkw.zvk.VK_IMAGE_USAGE_SAMPLED_BIT,
+        .usage = zvkw.zvk.VK_IMAGE_USAGE_TRANSFER_SRC_BIT | zvkw.zvk.VK_IMAGE_USAGE_TRANSFER_DST_BIT | zvkw.zvk.VK_IMAGE_USAGE_SAMPLED_BIT,
         .initialLayout = zvkw.zvk.VK_IMAGE_LAYOUT_UNDEFINED,
     };
     const imageAllocCI = zvkw.vma.VmaAllocationCreateInfo{
@@ -146,29 +168,7 @@ pub fn uploadTexture(ctx: *zvkw.VulkanContext, pixels: []const u8, width: u32, h
         .imageExtent = .{ .width = width, .height = height, .depth = 1 },
     };
     zvkw.zvk.vkCmdCopyBufferToImage(cb, @ptrCast(staging.buffer), ctx.textureSlots[slot].image, zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-    const toShaderBarrier = zvkw.zvk.VkImageMemoryBarrier2{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_COPY_BIT,
-        .srcAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_WRITE_BIT,
-        .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = zvkw.zvk.VK_ACCESS_2_SHADER_READ_BIT,
-        .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        .image = ctx.textureSlots[slot].image,
-        .subresourceRange = .{
-            .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
-    const toShaderDep = zvkw.zvk.VkDependencyInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &toShaderBarrier,
-    };
-    zvkw.zvk.vkCmdPipelineBarrier2(cb, &toShaderDep);
+    upload.generateMipmaps(cb, ctx.textureSlots[slot].image, width, height, mip_levels);
     try check(zvkw.zvk.vkEndCommandBuffer(cb));
 
     const submitInfo = zvkw.zvk.VkSubmitInfo{
@@ -186,7 +186,7 @@ pub fn uploadTexture(ctx: *zvkw.VulkanContext, pixels: []const u8, width: u32, h
         .subresourceRange = .{
             .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
-            .levelCount = 1,
+            .levelCount = mip_levels,
             .baseArrayLayer = 0,
             .layerCount = 1,
         },

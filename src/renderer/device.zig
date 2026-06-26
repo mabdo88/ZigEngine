@@ -1,5 +1,6 @@
 const std = @import("std");
 const zvkw = @import("zVulkanContext.zig");
+const log = @import("../engine/log.zig");
 
 fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
@@ -21,9 +22,9 @@ pub fn setupDebugMessenger(ctx: *zvkw.VulkanContext) void {
         };
         const result = ctx.vkCreateDebugUtilsMessengerEXT.?(ctx.m_instance, &debugCI, null, &ctx.m_debugMessenger);
         if (result != zvkw.zvk.VK_SUCCESS) {
-            std.log.err("Failed to set up debug messenger", .{});
+            log.err(@src(), "Failed to set up debug messenger", .{});
         } else {
-            std.log.info("Debug messenger set up", .{});
+            log.info(@src(), "Debug messenger set up", .{});
         }
     }
 }
@@ -55,7 +56,7 @@ pub fn pickPhysicalDevice(ctx: *zvkw.VulkanContext) !void {
             }
         }
         if (!hasSwapchain) {
-            std.log.info("Device filtered: no swapchain support", .{});
+            log.info(@src(), "Device filtered: no swapchain support", .{});
             continue;
         }
         var qfCount: u32 = 0;
@@ -74,7 +75,7 @@ pub fn pickPhysicalDevice(ctx: *zvkw.VulkanContext) !void {
             }
         }
         if (graphicsPresentFamily == null) {
-            std.log.info("Device filtered: no graphics+present queue family", .{});
+            log.info(@src(), "Device filtered: no graphics+present queue family", .{});
             continue;
         }
 
@@ -95,7 +96,7 @@ pub fn pickPhysicalDevice(ctx: *zvkw.VulkanContext) !void {
         if (features.geometryShader == zvkw.zvk.VK_TRUE) score += 50;
         if (features.samplerAnisotropy == zvkw.zvk.VK_TRUE) score += 50;
 
-        std.log.info("Device: {s} | type: {} | score: {}", .{ props.deviceName, props.deviceType, score });
+        log.info(@src(), "Device: {s} | type: {} | score: {}", .{ props.deviceName, props.deviceType, score });
 
         if (score > bestScore) {
             bestScore = score;
@@ -110,7 +111,7 @@ pub fn pickPhysicalDevice(ctx: *zvkw.VulkanContext) !void {
 
     var props: zvkw.zvk.VkPhysicalDeviceProperties = undefined;
     zvkw.zvk.vkGetPhysicalDeviceProperties(ctx.m_physicalDevice, &props);
-    std.log.info("Selected GPU: {s}", .{props.deviceName});
+    log.info(@src(), "Selected GPU: {s}", .{props.deviceName});
 }
 
 pub fn createLogicalDevice(ctx: *zvkw.VulkanContext) !void {
@@ -187,11 +188,11 @@ fn debugCallback(
     _ = pUserData;
     if (pCallbackData) |data| {
         if (severity >= zvkw.zvk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
-            std.log.err("Validation Layer: {s}", .{data.pMessage});
+            log.err(@src(), "Validation Layer: {s}", .{data.pMessage});
         } else if (severity >= zvkw.zvk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
-            std.log.warn("Validation Layer: {s}", .{data.pMessage});
+            log.warn(@src(), "Validation Layer: {s}", .{data.pMessage});
         } else if (severity >= zvkw.zvk.VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
-            std.log.info("Validation Layer: {s}", .{data.pMessage});
+            log.info(@src(), "Validation Layer: {s}", .{data.pMessage});
         }
     }
     return zvkw.zvk.VK_FALSE;

@@ -4,15 +4,19 @@ const components = @import("../components/components.zig");
 const window = @import("../../../platform/window.zig");
 const SystemCreateCtx = @import("system.zig").SystemCreateCtx;
 const shared_state = @import("shared_state.zig");
+const InputState = @import("../../input.zig").InputState;
 
 pub const InputSystemState = struct {
     win: *window.Window,
+    input: InputState = .{},
 
     pub fn update(self: *InputSystemState, registry: *Registry, dt: f32) anyerror!void {
         _ = dt;
-        const target: ?usize = if (self.win.getKey(window.Key.one))
+        self.input.update(self.win);
+
+        const target: ?usize = if (self.input.justPressed(window.Key.one))
             0
-        else if (self.win.getKey(window.Key.two))
+        else if (self.input.justPressed(window.Key.two))
             1
         else
             null;
@@ -53,10 +57,10 @@ pub const InputSystemState = struct {
 
         fc.move_forward = 0.0;
         fc.move_right = 0.0;
-        if (self.win.getKey(window.Key.w)) fc.move_forward += 1.0;
-        if (self.win.getKey(window.Key.s)) fc.move_forward -= 1.0;
-        if (self.win.getKey(window.Key.d)) fc.move_right += 1.0;
-        if (self.win.getKey(window.Key.a)) fc.move_right -= 1.0;
+        if (self.input.isDown(window.Key.w)) fc.move_forward += 1.0;
+        if (self.input.isDown(window.Key.s)) fc.move_forward -= 1.0;
+        if (self.input.isDown(window.Key.d)) fc.move_right += 1.0;
+        if (self.input.isDown(window.Key.a)) fc.move_right -= 1.0;
     }
 };
 

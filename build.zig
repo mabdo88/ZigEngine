@@ -42,6 +42,13 @@ pub fn build(b: *std.Build) void {
         vma_translate.addIncludePath(.{ .cwd_relative = "/usr/include" });
     }
     vma_translate.addIncludePath(b.path("deps/vma/"));
+
+    const stb_translate = b.addTranslateC(.{
+        .root_source_file = b.path("deps/stb/stb_image.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    stb_translate.addIncludePath(b.path("deps/stb/"));
     // Add C++ VMA implementation
     exe.root_module.addCSourceFile(.{
         .file = b.path("src/renderer/vma_impl.cpp"),
@@ -91,10 +98,42 @@ pub fn build(b: *std.Build) void {
         exe.root_module.linkSystemLibrary("vulkan", .{});
     }
 
+    // Shader compilation — the engine writes shaders in Slang (not GLSL), so
+    // this runs slangc rather than glslc. Outputs land at the same fixed
+    // src/shaders/*.spv paths the renderer's @embedFile calls already
+    // expect, so no change is needed on that side. Always reruns (slangc is
+    // fast enough that build-cache tracking isn't worth the complexity).
+    const slangc_exe = if (os_tag == .windows) "slangc.exe" else "slangc";
+    const slangc_path = b.fmt("{s}/bin/{s}", .{ vulkan_sdk_path, slangc_exe });
+
+    const ShaderSpec = struct {
+        src: []const u8,
+        out: []const u8,
+        entries: []const []const u8,
+    };
+    const shader_specs = [_]ShaderSpec{
+        .{ .src = "src/shaders/shader.slang", .out = "src/shaders/slang.spv", .entries = &.{ "vertMain", "fragMain" } },
+        .{ .src = "src/shaders/shadow.slang", .out = "src/shaders/shadow.spv", .entries = &.{"vertMain"} },
+    };
+
+    const shaders_step = b.step("shaders", "Compile .slang shaders to .spv via slangc");
+    for (shader_specs) |spec| {
+        const cmd = b.addSystemCommand(&.{ slangc_path, spec.src, "-target", "spirv", "-profile", "spirv_1_4", "-emit-spirv-directly", "-fvk-use-entrypoint-name" });
+        for (spec.entries) |entry| cmd.addArgs(&.{ "-entry", entry });
+        cmd.addArgs(&.{ "-o", spec.out });
+        shaders_step.dependOn(&cmd.step);
+        exe.step.dependOn(&cmd.step);
+    }
+
     const vma_module = vma_translate.createModule();
     b.modules.put(b.allocator, "vmaimport", vma_module) catch unreachable;
     mod.addImport("vmaimport", vma_module);
     exe.root_module.addImport("vmaimport", vma_module);
+
+    const stb_module = stb_translate.createModule();
+    b.modules.put(b.allocator, "stbimport", stb_module) catch unreachable;
+    mod.addImport("stbimport", stb_module);
+    exe.root_module.addImport("stbimport", stb_module);
 
     // Run step
     const run_step = b.step("run", "Run the app");
@@ -112,6 +151,7 @@ pub fn build(b: *std.Build) void {
     // Executable tests (needs C++ runtime for VMA)
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
     exe_tests.is_linking_libcpp = true;
+    exe_tests.step.dependOn(shaders_step);
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
     // Test step (runs in parallel)
@@ -127,8 +167,6 @@ pub fn build(b: *std.Build) void {
         "-ODebug",
         "--cache-dir",
         ".zig-cache",
-        "--global-cache-dir",
-        b.graph.global_cache_root.path orelse "",
     });
     const ecs_test_step = b.step("test-ecs", "Run ECS tests");
     ecs_test_step.dependOn(&ecs_test_cmd.step);

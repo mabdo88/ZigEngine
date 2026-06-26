@@ -4,13 +4,15 @@ const compstrg = @import("componentStorage.zig");
 const components = @import("../components/components.zig");
 const event = @import("../event.zig");
 const meshCache = @import("../../../resources/meshCache.zig");
+const log = @import("../../log.zig");
+const Timer = @import("../../timer.zig").Timer;
 
 fn StorageType() type {
     var types: [components.AllComponents.len]type = undefined;
     inline for (components.AllComponents, 0..) |C, i| {
         types[i] = compstrg.ComponentStorage(C);
     }
-    return std.meta.Tuple(&types);
+    return @Tuple(&types);
 }
 pub const Registry = struct {
     freeList: std.ArrayList(u32) = .empty,
@@ -24,7 +26,7 @@ pub const Registry = struct {
     mesh_cache: meshCache.MeshCache = undefined,
 
     pub fn init(allocator: std.mem.Allocator) Registry {
-        std.log.info("Initializing Registry", .{});
+        log.info(@src(), "Initializing Registry", .{});
         var self = Registry{};
         self.registry_allocator = allocator;
         self.MAX_ENTITIES = 1_000_000;
@@ -33,7 +35,7 @@ pub const Registry = struct {
         inline for (0..self.storage.len) |i| {
             self.storage[i] = .{};
         }
-        std.log.info("Registry Online", .{});
+        log.info(@src(), "Registry Online", .{});
         return self;
     }
 
@@ -56,7 +58,7 @@ pub const Registry = struct {
         self.events.deinit();
         self.mesh_cache.deinit();
 
-        std.log.info("Registry Offline", .{});
+        log.info(@src(), "Registry Offline", .{});
     }
 
     pub fn createEntity(self: *Registry) !Entity {
@@ -567,4 +569,48 @@ test "normal recycling works alongside retired slot" {
     try std.testing.expect(new_e.index == e0.index or new_e.index == e2.index);
     try std.testing.expect(new_e.index != e1.index);
     try std.testing.expect(new_e.generation > 0);
+}
+
+test "10k entity create+attach+query+destroy benchmark" {
+    var reg = Registry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    var timer = Timer.start(threaded.io());
+
+    const n: usize = 10_000;
+    const entities = try std.testing.allocator.alloc(Entity, n);
+    defer std.testing.allocator.free(entities);
+
+    for (entities) |*e| {
+        e.* = try reg.create();
+        try reg.add(e.*, components.TransformComponent{
+            .position = .{ 0.0, 0.0, 0.0 },
+            .rotation = .{ 0.0, 0.0, 0.0 },
+            .scale = .{ 1.0, 1.0, 1.0 },
+        });
+    }
+    const create_attach_s = timer.tick();
+
+    var count: u32 = 0;
+    var it = reg.Query(.{components.TransformComponent});
+    while (it.next()) |_| count += 1;
+    const query_s = timer.tick();
+    try std.testing.expectEqual(@as(u32, n), count);
+
+    for (entities) |e| try reg.destroyEntity(e);
+    const destroy_s = timer.tick();
+
+    log.info(@src(), "10k-entity bench: create+attach={d:.3}ms query={d:.3}ms destroy={d:.3}ms", .{
+        create_attach_s * 1000.0, query_s * 1000.0, destroy_s * 1000.0,
+    });
+
+    // Debug builds (what `zig build test` runs) are unoptimized, so these
+    // bounds are generous rather than the roadmap's literal "<1ms" — the
+    // point is catching an accidental O(n^2) regression, not chasing a
+    // release-build perf number in a debug test run.
+    try std.testing.expect(create_attach_s < 0.05);
+    try std.testing.expect(query_s < 0.01);
+    try std.testing.expect(destroy_s < 0.05);
 }

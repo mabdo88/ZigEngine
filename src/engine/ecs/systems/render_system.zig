@@ -18,11 +18,11 @@ pub const RenderSystemState = struct {
     allocator: std.mem.Allocator = undefined,
     texture_cache: std.AutoHashMap(u32, u32) = undefined,
 
-    pub fn init(self: *RenderSystemState, allocator: std.mem.Allocator, registry: *Registry, title: [:0]const u8, width: u16, height: u16) !void {
+    pub fn init(self: *RenderSystemState, allocator: std.mem.Allocator, registry: *Registry, title: [:0]const u8, width: u16, height: u16, vsync: bool, hot_reload_shaders: bool) !void {
         self.allocator = allocator;
         self.texture_cache = std.AutoHashMap(u32, u32).init(allocator);
         try self.texture_cache.ensureTotalCapacity(@intCast(16));
-        try renderer.init(allocator, title, width, height, registry, &self.gpu_system);
+        try renderer.init(allocator, title, width, height, vsync, hot_reload_shaders, registry, &self.gpu_system);
     }
 
     pub fn deinit(self: *RenderSystemState, registry: *Registry) void {
@@ -59,9 +59,23 @@ pub const RenderSystemState = struct {
         var cam_it = registry.Query(.{components.CameraMatricesComponent});
         const cam_entity = cam_it.next() orelse return;
         const m = registry.get(components.CameraMatricesComponent, cam_entity).?;
-        const matrices = math.CameraMatrices{ .view = m.view, .projection = m.proj };
+        const cam = registry.get(components.CameraComponent, cam_entity);
+        const matrices = math.CameraMatrices{
+            .view = m.view,
+            .projection = m.proj,
+            .position = if (cam) |c| c.position else .{ 0.0, 0.0, 0.0 },
+        };
+        const light = math.SceneLight{
+            .direction = math.normalize(shared_state.light.direction),
+            .color = shared_state.light.color,
+            .ambient = shared_state.light.ambient,
+            .shadow_half_extent = shared_state.light.shadow_half_extent,
+            .shadow_distance = shared_state.light.shadow_distance,
+            .shadow_near = shared_state.light.shadow_near,
+            .shadow_far = shared_state.light.shadow_far,
+        };
 
-        try renderer.render(matrices, registry, &self.gpu_system, dt);
+        try renderer.render(matrices, light, registry, &self.gpu_system, dt);
     }
 
     fn uploadPendingTextures(self: *RenderSystemState, registry: *Registry) !void {
@@ -85,7 +99,8 @@ pub const RenderSystemState = struct {
             }
 
             if (resolved) {
-                try registry.set(entity, components.TextureComponent{ .textureIndex = index });
+                const material_index = try renderer.registerMaterial(0.0, 0.5, index);
+                try registry.set(entity, components.MaterialComponent{ .material_index = material_index });
                 registry.remove(components.TextureDataComponent, entity);
             }
         }
@@ -99,9 +114,10 @@ pub fn update(registry: *Registry, ctx: *anyopaque, dt: f32) anyerror!void {
 
 pub fn create(ctx: *SystemCreateCtx) anyerror!*anyopaque {
     const state = try ctx.allocator.create(RenderSystemState);
-    try state.init(ctx.allocator, ctx.registry, ctx.config.window_title, ctx.config.window_width, ctx.config.window_height);
+    try state.init(ctx.allocator, ctx.registry, ctx.config.window_title, ctx.config.window_width, ctx.config.window_height, ctx.config.vsync, ctx.config.hot_reload_shaders);
     try ctx.registry.events.subscribe(.scene_unloaded, @ptrCast(state), RenderSystemState.onSceneUnloaded);
     render_state_ptr = state;
+    shared_state.light = ctx.config.lighting;
     shared_state.window_ptr = renderer.windowPtr();
     shared_state.aspect_ratio = renderer.aspectRatio();
     return @ptrCast(state);

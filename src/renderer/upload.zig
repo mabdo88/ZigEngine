@@ -5,6 +5,109 @@ fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
 }
 
+pub fn mipLevelsForSize(width: u32, height: u32) u32 {
+    const largest = @max(@max(width, height), 1);
+    return @as(u32, std.math.log2_int(u32, largest)) + 1;
+}
+
+/// Generates mip levels [1, mip_levels) by repeatedly blitting from the
+/// previous level, assuming mip 0 is already populated and currently in
+/// TRANSFER_DST_OPTIMAL (i.e. called right after the base-level upload, in
+/// the same command buffer). Leaves every mip level in
+/// SHADER_READ_ONLY_OPTIMAL. A 1x1 (mip_levels == 1) texture just gets the
+/// final transition with no blits.
+pub fn generateMipmaps(cmd: zvkw.zvk.VkCommandBuffer, image: zvkw.zvk.VkImage, width: u32, height: u32, mip_levels: u32) void {
+    var mip_w: i32 = @intCast(width);
+    var mip_h: i32 = @intCast(height);
+
+    var level: u32 = 1;
+    while (level < mip_levels) : (level += 1) {
+        const pre_barriers = [2]zvkw.zvk.VkImageMemoryBarrier2{
+            .{
+                .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_COPY_BIT | zvkw.zvk.VK_PIPELINE_STAGE_2_BLIT_BIT,
+                .srcAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_BLIT_BIT,
+                .dstAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_READ_BIT,
+                .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                .image = image,
+                .subresourceRange = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = level - 1, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
+            },
+            .{
+                // Destination mip has never been touched (still UNDEFINED from image creation) — transition it for the blit write.
+                .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_NONE,
+                .srcAccessMask = zvkw.zvk.VK_ACCESS_2_NONE,
+                .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_BLIT_BIT,
+                .dstAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                .image = image,
+                .subresourceRange = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = level, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
+            },
+        };
+        const pre_dep = zvkw.zvk.VkDependencyInfo{
+            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 2,
+            .pImageMemoryBarriers = &pre_barriers,
+        };
+        zvkw.zvk.vkCmdPipelineBarrier2(cmd, &pre_dep);
+
+        const next_w = @max(@divTrunc(mip_w, 2), 1);
+        const next_h = @max(@divTrunc(mip_h, 2), 1);
+        const blit = zvkw.zvk.VkImageBlit{
+            .srcSubresource = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = level - 1, .baseArrayLayer = 0, .layerCount = 1 },
+            .srcOffsets = .{ .{ .x = 0, .y = 0, .z = 0 }, .{ .x = mip_w, .y = mip_h, .z = 1 } },
+            .dstSubresource = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT, .mipLevel = level, .baseArrayLayer = 0, .layerCount = 1 },
+            .dstOffsets = .{ .{ .x = 0, .y = 0, .z = 0 }, .{ .x = next_w, .y = next_h, .z = 1 } },
+        };
+        zvkw.zvk.vkCmdBlitImage(cmd, image, zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, image, zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, zvkw.zvk.VK_FILTER_LINEAR);
+
+        mip_w = next_w;
+        mip_h = next_h;
+    }
+
+    // Mips [0, mip_levels-2] are now in TRANSFER_SRC_OPTIMAL (read from during blits);
+    // the last mip is still in TRANSFER_DST_OPTIMAL (written, never read from). Both
+    // need to land in SHADER_READ_ONLY_OPTIMAL for the fragment shader to sample them.
+    var final_barriers: [2]zvkw.zvk.VkImageMemoryBarrier2 = undefined;
+    var barrier_count: u32 = 0;
+    if (mip_levels > 1) {
+        final_barriers[barrier_count] = .{
+            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_BLIT_BIT,
+            .srcAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_READ_BIT,
+            .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            .dstAccessMask = zvkw.zvk.VK_ACCESS_2_SHADER_READ_BIT,
+            .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image = image,
+            .subresourceRange = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = mip_levels - 1, .baseArrayLayer = 0, .layerCount = 1 },
+        };
+        barrier_count += 1;
+    }
+    final_barriers[barrier_count] = .{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_COPY_BIT | zvkw.zvk.VK_PIPELINE_STAGE_2_BLIT_BIT,
+        .srcAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = zvkw.zvk.VK_ACCESS_2_SHADER_READ_BIT,
+        .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .image = image,
+        .subresourceRange = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = mip_levels - 1, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
+    };
+    barrier_count += 1;
+
+    const final_dep = zvkw.zvk.VkDependencyInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = barrier_count,
+        .pImageMemoryBarriers = &final_barriers,
+    };
+    zvkw.zvk.vkCmdPipelineBarrier2(cmd, &final_dep);
+}
+
 pub const StagingBuffer = struct {
     buffer: zvkw.zvk.VkBuffer,
     allocation: zvkw.vma.VmaAllocation,
@@ -156,35 +259,23 @@ pub const UploadBatch = struct {
             pixels,
         );
 
-        const barrier_to_dst = zvkw.zvk.VkImageMemoryBarrier{
-            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        const to_dst_barrier = zvkw.zvk.VkImageMemoryBarrier2{
+            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_NONE,
+            .srcAccessMask = zvkw.zvk.VK_ACCESS_2_NONE,
+            .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_COPY_BIT,
+            .dstAccessMask = zvkw.zvk.VK_ACCESS_2_TRANSFER_WRITE_BIT,
             .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .srcQueueFamilyIndex = zvkw.zvk.VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = zvkw.zvk.VK_QUEUE_FAMILY_IGNORED,
             .image = image,
-            .subresourceRange = .{
-                .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-            .srcAccessMask = 0,
-            .dstAccessMask = zvkw.zvk.VK_ACCESS_TRANSFER_WRITE_BIT,
+            .subresourceRange = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
         };
-        zvkw.zvk.vkCmdPipelineBarrier(
-            self.cmd,
-            zvkw.zvk.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            zvkw.zvk.VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0,
-            0,
-            null,
-            0,
-            null,
-            1,
-            &barrier_to_dst,
-        );
+        const to_dst_dep = zvkw.zvk.VkDependencyInfo{
+            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &to_dst_barrier,
+        };
+        zvkw.zvk.vkCmdPipelineBarrier2(self.cmd, &to_dst_dep);
 
         const region = zvkw.zvk.VkBufferImageCopy{
             .bufferOffset = 0,
@@ -208,35 +299,7 @@ pub const UploadBatch = struct {
             &region,
         );
 
-        const barrier_to_read = zvkw.zvk.VkImageMemoryBarrier{
-            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .srcQueueFamilyIndex = zvkw.zvk.VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = zvkw.zvk.VK_QUEUE_FAMILY_IGNORED,
-            .image = image,
-            .subresourceRange = .{
-                .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-            .srcAccessMask = zvkw.zvk.VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask = zvkw.zvk.VK_ACCESS_SHADER_READ_BIT,
-        };
-        zvkw.zvk.vkCmdPipelineBarrier(
-            self.cmd,
-            zvkw.zvk.VK_PIPELINE_STAGE_TRANSFER_BIT,
-            zvkw.zvk.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0,
-            0,
-            null,
-            0,
-            null,
-            1,
-            &barrier_to_read,
-        );
+        generateMipmaps(self.cmd, image, width, height, mipLevelsForSize(width, height));
     }
 
     pub fn submit(self: *UploadBatch) !void {

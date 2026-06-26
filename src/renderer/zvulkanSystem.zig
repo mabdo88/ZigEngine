@@ -8,15 +8,69 @@ const device = @import("device.zig");
 const swapchain = @import("swapchain.zig");
 const pipeline = @import("pipeline.zig");
 const material = @import("material.zig");
+const shadow = @import("shadow.zig");
 const event = @import("../engine/ecs/event.zig");
 const math = @import("../engine/math.zig");
+const hotreload = @import("../engine/hotreload.zig");
+const log = @import("../engine/log.zig");
 
 fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
 }
 
-pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, reg: *rgstry.Registry, render_system: *rs) !void {
+var shader_watcher: ?hotreload.FileWatcher = null;
+
+fn startShaderWatcher(allocator: std.mem.Allocator) void {
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var watcher = hotreload.FileWatcher.init(allocator);
+    var any_watched = false;
+    for ([_][]const u8{ "src/shaders/slang.spv", "src/shaders/shadow.spv" }) |path| {
+        watcher.watch(io, path) catch |e| {
+            log.warn(@src(), "hotreload: couldn't watch '{s}': {s}", .{ path, @errorName(e) });
+            continue;
+        };
+        any_watched = true;
+    }
+    if (!any_watched) {
+        watcher.deinit();
+        return;
+    }
+    // Move into the persistent global before start() — the spawned thread
+    // captures `&shader_watcher.?`, which must outlive this function's stack
+    // frame; starting on the local `watcher` would leave it holding a
+    // dangling pointer the moment this function returns.
+    shader_watcher = watcher;
+    shader_watcher.?.start() catch |e| {
+        log.warn(@src(), "hotreload: failed to start watcher thread: {s}", .{@errorName(e)});
+        shader_watcher.?.deinit();
+        shader_watcher = null;
+        return;
+    };
+}
+
+fn checkShaderHotReload() !void {
+    const watcher = if (shader_watcher) |*w| w else return;
+    const changed = try watcher.pollChanged();
+    defer {
+        for (changed) |p| watcher.allocator.free(p);
+        watcher.allocator.free(changed);
+    }
+    if (changed.len == 0) return;
+
+    _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
+    zvkw.zvk.vkDestroyPipeline(zvkw.ctx.m_Device, zvkw.ctx.pipeline, null);
+    zvkw.zvk.vkDestroyPipeline(zvkw.ctx.m_Device, zvkw.ctx.shadowPipeline, null);
+    try pipeline.createPipeline(&zvkw.ctx);
+    try shadow.createShadowPipeline(&zvkw.ctx);
+    log.info(@src(), "hotreload: recreated render pipelines", .{});
+}
+
+pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16, WHeight: u16, vsync: bool, hot_reload_shaders: bool, reg: *rgstry.Registry, render_system: *rs) !void {
     zvkw.ctx.zallocator = zig_allocator;
+    zvkw.ctx.vsync = vsync;
     render_system.* = try rs.initCapacity(&zvkw.ctx, zig_allocator, 256, 64);
     try zvkw.win.init();
     errdefer zvkw.win.terminate();
@@ -129,12 +183,33 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
         }
     }
 
+    try material.createMaterialBuffer(&zvkw.ctx);
+    errdefer material.destroyMaterialBuffer(&zvkw.ctx);
+    pipeline.writeMaterialDescriptor(&zvkw.ctx);
+
+    try shadow.createShadowResources(&zvkw.ctx);
+    errdefer shadow.destroyShadowResources(&zvkw.ctx);
+
+    try shadow.createShadowPipeline(&zvkw.ctx);
+    errdefer shadow.destroyShadowPipeline(&zvkw.ctx);
+
+    pipeline.writeShadowDescriptor(&zvkw.ctx);
+
+    if (hot_reload_shaders) startShaderWatcher(zig_allocator);
+
     try reg.events.subscribe(.entity_destroyed, @ptrCast(render_system), rs.onEntityDestroyed);
 }
 
 pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
     _ = reg;
+    if (shader_watcher) |*w| {
+        w.deinit();
+        shader_watcher = null;
+    }
     _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
+    shadow.destroyShadowPipeline(&zvkw.ctx);
+    shadow.destroyShadowResources(&zvkw.ctx);
+    material.destroyMaterialBuffer(&zvkw.ctx);
     zvkw.ctx.zallocator.free(zvkw.ctx.extensions);
     for (0..zvkw.ctx.textureCount) |i| {
         zvkw.zvk.vkDestroyImageView(zvkw.ctx.m_Device, zvkw.ctx.textureSlots[i].view, null);
@@ -186,7 +261,9 @@ pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
     zvkw.win.terminate();
 }
 
-pub fn render(matrices: math.CameraMatrices, reg: *rgstry.Registry, render_system: *rs, dt: f32) !void {
+pub fn render(matrices: math.CameraMatrices, light: math.SceneLight, reg: *rgstry.Registry, render_system: *rs, dt: f32) !void {
+    try checkShaderHotReload();
+
     try check(zvkw.zvk.vkWaitForFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex], zvkw.zvk.VK_TRUE, std.math.maxInt(u64)));
 
     if (zvkw.win.wasResized()) {
@@ -206,9 +283,14 @@ pub fn render(matrices: math.CameraMatrices, reg: *rgstry.Registry, render_syste
     }
     try check(zvkw.zvk.vkResetFences(zvkw.ctx.m_Device, 1, &zvkw.ctx.fences[zvkw.ctx.frameIndex]));
 
+    const light_view_proj = math.directionalLightViewProj(light);
     const uboData = zvkw.FrameUBO{
         .projection = matrices.projection,
         .view = matrices.view,
+        .light_view_proj = light_view_proj,
+        .light_dir = .{ light.direction[0], light.direction[1], light.direction[2], 0.0 },
+        .light_color = .{ light.color[0], light.color[1], light.color[2], light.ambient },
+        .camera_pos = .{ matrices.position[0], matrices.position[1], matrices.position[2], 0.0 },
     };
     @memcpy(@as([*]u8, @ptrCast(zvkw.ctx.shaderDataBuffers[zvkw.ctx.frameIndex].allocInfo.pMappedData.?))[0..@sizeOf(zvkw.FrameUBO)], std.mem.asBytes(&uboData));
     const cb = zvkw.ctx.commandBuffers[zvkw.ctx.frameIndex];
@@ -219,6 +301,78 @@ pub fn render(matrices: math.CameraMatrices, reg: *rgstry.Registry, render_syste
         .flags = zvkw.zvk.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
     try check(zvkw.zvk.vkBeginCommandBuffer(cb, &cbBI));
+
+    const shadowToAttachmentBarrier = zvkw.zvk.VkImageMemoryBarrier2{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .srcAccessMask = zvkw.zvk.VK_ACCESS_2_SHADER_READ_BIT,
+        .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT,
+        .dstAccessMask = zvkw.zvk.VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .oldLayout = zvkw.ctx.shadowImageLayout,
+        .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .image = zvkw.ctx.shadowImage,
+        .subresourceRange = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
+    };
+    const shadowToAttachmentDep = zvkw.zvk.VkDependencyInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &shadowToAttachmentBarrier,
+    };
+    zvkw.zvk.vkCmdPipelineBarrier2(cb, &shadowToAttachmentDep);
+    zvkw.ctx.shadowImageLayout = zvkw.zvk.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+
+    const shadowAttachmentInfo = zvkw.zvk.VkRenderingAttachmentInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = zvkw.ctx.shadowImageView,
+        .imageLayout = zvkw.zvk.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .loadOp = zvkw.zvk.VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = zvkw.zvk.VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = .{ .depthStencil = .{ .depth = 1.0, .stencil = 0 } },
+    };
+    const shadowRenderingInfo = zvkw.zvk.VkRenderingInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = .{ .offset = .{ .x = 0, .y = 0 }, .extent = .{ .width = zvkw.SHADOW_MAP_SIZE, .height = zvkw.SHADOW_MAP_SIZE } },
+        .layerCount = 1,
+        .colorAttachmentCount = 0,
+        .pDepthAttachment = &shadowAttachmentInfo,
+    };
+    zvkw.zvk.vkCmdBeginRendering(cb, &shadowRenderingInfo);
+    const shadowVp = zvkw.zvk.VkViewport{
+        .x = 0,
+        .y = 0,
+        .width = @floatFromInt(zvkw.SHADOW_MAP_SIZE),
+        .height = @floatFromInt(zvkw.SHADOW_MAP_SIZE),
+        .minDepth = 0.0,
+        .maxDepth = 1.0,
+    };
+    zvkw.zvk.vkCmdSetViewport(cb, 0, 1, &shadowVp);
+    const shadowScissor = zvkw.zvk.VkRect2D{
+        .offset = .{ .x = 0, .y = 0 },
+        .extent = .{ .width = zvkw.SHADOW_MAP_SIZE, .height = zvkw.SHADOW_MAP_SIZE },
+    };
+    zvkw.zvk.vkCmdSetScissor(cb, 0, 1, &shadowScissor);
+    zvkw.zvk.vkCmdBindPipeline(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.shadowPipeline);
+    try render_system.updateShadow(reg, cb, light_view_proj);
+    zvkw.zvk.vkCmdEndRendering(cb);
+
+    const shadowToReadBarrier = zvkw.zvk.VkImageMemoryBarrier2{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+        .srcAccessMask = zvkw.zvk.VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = zvkw.zvk.VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = zvkw.zvk.VK_ACCESS_2_SHADER_READ_BIT,
+        .oldLayout = zvkw.zvk.VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .newLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .image = zvkw.ctx.shadowImage,
+        .subresourceRange = .{ .aspectMask = zvkw.zvk.VK_IMAGE_ASPECT_DEPTH_BIT, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1 },
+    };
+    const shadowToReadDep = zvkw.zvk.VkDependencyInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &shadowToReadBarrier,
+    };
+    zvkw.zvk.vkCmdPipelineBarrier2(cb, &shadowToReadDep);
+    zvkw.ctx.shadowImageLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     const outputBarriers = [2]zvkw.zvk.VkImageMemoryBarrier2{
         .{
@@ -358,8 +512,8 @@ pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !zvkw.TextureH
     return material.uploadTexture(&zvkw.ctx, pixels, width, height);
 }
 
-pub fn resetTextures() void {
-    material.resetTextures(&zvkw.ctx);
+pub fn registerMaterial(metallic: f32, roughness: f32, albedo_texture_index: zvkw.TextureHandle) !zvkw.MaterialHandle {
+    return material.registerMaterial(&zvkw.ctx, metallic, roughness, albedo_texture_index);
 }
 
 pub fn shouldClose() bool {

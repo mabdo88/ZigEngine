@@ -1,0 +1,1845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Strife Engine Roadmap</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#09090f;--surf:#0d1018;--card:#11151e;--card2:#141820;
+  --border:#1a1f2e;--border2:#222840;
+  --amber:#c87810;--amber-b:#e08a18;--amber-d:rgba(200,120,16,.12);
+  --blue:#3870bb;--green:#1e8848;--green-d:rgba(30,136,72,.12);
+  --red:#8c2828;--text:#9ab8cc;--text2:#bdd0e4;--muted:#3a4c60;
+  --mono:'JetBrains Mono','Cascadia Code',monospace;
+  --sans:'Inter',-apple-system,sans-serif;
+  --r:5px;
+}
+html{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;scroll-behavior:smooth}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* HEADER */
+header{max-width:1080px;margin:0 auto;padding:36px 24px 28px;border-bottom:1px solid var(--border2)}
+.hdr-top{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.badge{font-family:var(--mono);font-size:10px;letter-spacing:.14em;background:var(--amber-d);border:1px solid var(--amber);color:var(--amber-b);padding:3px 10px;border-radius:var(--r);text-transform:uppercase}
+h1{font-size:20px;font-weight:700;color:var(--text2);letter-spacing:-.01em}
+.stack{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.06em;margin-left:auto}
+.goal{font-size:12px;color:var(--muted);margin-bottom:24px}
+
+/* HUD CELLS */
+.cells{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.cell{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:default;min-width:72px}
+.cell-bar{width:72px;height:6px;background:var(--border2);border-radius:3px;overflow:hidden;position:relative}
+.cell-fill{height:100%;border-radius:3px;background:var(--amber);transition:width .5s ease,background .5s ease;box-shadow:0 0 5px var(--amber);width:0%}
+.cell-fill.complete{background:var(--green);box-shadow:0 0 8px var(--green)}
+.cell-label{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:72px}
+.cell-label.complete{color:var(--green)}
+
+/* OVERALL */
+.overall{display:flex;align-items:center;gap:12px}
+.ob-wrap{flex:1;height:3px;background:var(--border2);border-radius:2px;overflow:hidden}
+.ob-fill{height:100%;background:var(--amber);border-radius:2px;transition:width .4s ease}
+.ob-pct{font-family:var(--mono);font-size:13px;color:var(--amber-b);min-width:38px;text-align:right;font-weight:500}
+.ob-counts{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:52px}
+
+/* MAIN */
+main{max-width:1080px;margin:0 auto;padding:28px 24px 80px}
+
+/* MILESTONE */
+.ms{margin-bottom:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.ms-hdr{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--surf);cursor:pointer;user-select:none;transition:background .15s}
+.ms-hdr:hover{background:var(--card)}
+.ms-icon{font-size:14px;opacity:.75;flex-shrink:0}
+.ms-num{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.06em;flex-shrink:0}
+.ms-name{font-size:14px;font-weight:600;color:var(--text2);flex:1}
+.ms-ptext{font-family:var(--mono);font-size:11px;color:var(--muted);flex-shrink:0}
+.ms-mbar{width:64px;height:3px;background:var(--border2);border-radius:2px;overflow:hidden;flex-shrink:0}
+.ms-mfill{height:100%;background:var(--amber);border-radius:2px;transition:width .4s ease}
+.chv{font-size:9px;color:var(--muted);margin-left:6px;transition:transform .2s;flex-shrink:0}
+.chv.open{transform:rotate(90deg)}
+.ms.stop .ms-hdr{background:rgba(140,40,40,.06);border-bottom:1px solid rgba(140,40,40,.25)}
+.ms.stop .ms-name{color:#bb5555}
+
+/* TASK LIST */
+.ms-body{background:var(--card);border-top:1px solid var(--border)}
+.task{border-bottom:1px solid var(--border)}
+.task:last-child{border-bottom:none}
+.task-main{display:flex;align-items:center;gap:10px;padding:9px 16px}
+
+.task-cb{appearance:none;width:15px;height:15px;border:1px solid var(--border2);border-radius:3px;background:transparent;cursor:pointer;position:relative;flex-shrink:0;transition:all .15s}
+.task-cb:hover{border-color:var(--amber)}
+.task-cb:checked{background:var(--green);border-color:var(--green)}
+.task-cb:checked::after{content:"✓";position:absolute;top:-1px;left:2px;font-size:10px;color:#fff;font-weight:700}
+.task-cb.partial{background:rgba(200,120,16,.16);border-color:var(--amber)}
+.task-cb.partial::after{content:"~";position:absolute;top:-2px;left:3px;font-size:11px;color:var(--amber);font-weight:700}
+
+.task-name{flex:1;font-size:13px;color:var(--text);cursor:default}
+.task-cb:checked + .task-name{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--border2)}
+.task-name.partial{color:var(--amber)}
+
+.tag{font-family:var(--mono);font-size:9px;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;border-radius:3px;flex-shrink:0}
+.tg-platform{background:rgba(56,112,187,.14);color:#5594dd;border:1px solid rgba(56,112,187,.28)}
+.tg-core{background:rgba(200,120,16,.1);color:#c87a28;border:1px solid rgba(200,120,16,.22)}
+.tg-ecs{background:rgba(110,60,190,.14);color:#9070dd;border:1px solid rgba(110,60,190,.28)}
+.tg-renderer{background:rgba(20,140,180,.12);color:#28aacc;border:1px solid rgba(20,140,180,.26)}
+.tg-assets{background:rgba(170,120,30,.12);color:#c09030;border:1px solid rgba(170,120,30,.26)}
+.tg-anim{background:rgba(180,70,130,.12);color:#cc60a0;border:1px solid rgba(180,70,130,.26)}
+.tg-physics{background:rgba(40,160,90,.11);color:#38aa66;border:1px solid rgba(40,160,90,.24)}
+.tg-scene{background:rgba(170,140,20,.11);color:#c8aa28;border:1px solid rgba(170,140,20,.24)}
+.tg-audio{background:rgba(60,160,200,.11);color:#44b4cc;border:1px solid rgba(60,160,200,.24)}
+.tg-ui{background:rgba(190,70,160,.11);color:#cc55bb;border:1px solid rgba(190,70,160,.24)}
+.tg-gameplay{background:rgba(200,50,50,.1);color:#cc5050;border:1px solid rgba(200,50,50,.22)}
+
+.exp-btn{background:none;border:1px solid var(--border2);color:var(--muted);padding:2px 8px;border-radius:3px;font-size:9px;cursor:pointer;font-family:var(--mono);letter-spacing:.07em;flex-shrink:0;transition:all .15s}
+.exp-btn:hover{border-color:var(--amber);color:var(--amber)}
+.exp-btn.open{border-color:var(--amber);color:var(--amber);background:var(--amber-d)}
+
+/* TASK DETAIL */
+.task-detail{display:none;padding:12px 16px 16px 41px;background:var(--card2);border-top:1px solid var(--border)}
+.task-detail.show{display:block}
+.det-desc{font-size:12.5px;color:var(--text);margin-bottom:10px;line-height:1.65}
+.det-notes{margin-bottom:14px;list-style:none}
+.det-notes li{font-size:12px;color:var(--muted);margin-bottom:3px;padding-left:14px;position:relative;line-height:1.5}
+.det-notes li::before{content:"›";position:absolute;left:0;color:var(--amber);font-size:13px}
+.prompt-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+.prompt-lbl{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber)}
+.copy-btn{background:var(--amber-d);border:1px solid rgba(200,120,16,.35);color:var(--amber);font-family:var(--mono);font-size:9px;padding:3px 10px;border-radius:3px;cursor:pointer;letter-spacing:.07em;transition:all .15s}
+.copy-btn:hover{background:var(--amber);color:#000}
+.copy-btn.ok{background:var(--green-d);border-color:var(--green);color:var(--green)}
+.prompt-box{background:#060810;border:1px solid var(--border2);border-radius:4px;padding:11px 13px;font-family:var(--mono);font-size:11.5px;color:#7a9cb4;line-height:1.7;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow-y:auto;tab-size:2}
+.prompt-box::-webkit-scrollbar{width:3px}
+.prompt-box::-webkit-scrollbar-thumb{background:var(--border2)}
+
+/* STOP */
+.stop-body{padding:20px 16px;text-align:center}
+.stop-title{font-size:17px;font-weight:700;color:#bb5555;margin-bottom:6px}
+.stop-sub{font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div class="hdr-top">
+    <span class="badge">STRIFE</span>
+    <h1>Engine Roadmap</h1>
+    <span class="stack">Zig master · Vulkan 1.3 · Flecs ECS · Cross-Platform</span>
+  </div>
+  <p class="goal">Complete Milestones 0–9 → stop engine work → build Strife gameplay only.</p>
+  <div class="cells" id="cells"></div>
+  <div class="overall">
+    <div class="ob-wrap"><div class="ob-fill" id="ob-fill" style="width:0%"></div></div>
+    <span class="ob-pct" id="ob-pct">0%</span>
+    <span class="ob-counts" id="ob-counts"></span>
+  </div>
+</header>
+<main id="root"></main>
+
+<script>
+const D = [
+{n:0,name:"Foundation",icon:"⚙",tasks:[
+{id:"m0t0",name:"Window",tag:"platform",
+ desc:"Cross-platform window layer with OS-specific backends (Win32, X11/Wayland, Cocoa) selected at compile time. A shared platform.zig interface defines callbacks; each backend implements them. The renderer only sees the abstract interface.",
+ notes:["Platform interface: src/platform/platform.zig — PlatformCallbacks + Window struct with fn pointers","Backends: src/platform/win32.zig (Windows), src/platform/x11.zig (Linux), src/platform/cocoa.zig (macOS)","Comptime backend selection via @import(\"builtin\").os.tag in platform.zig","Vulkan surface creation: vkCreateWin32SurfaceKHR / vkCreateXlibSurfaceKHR / vkCreateMetalSurfaceEXT per backend","SDL3 is a valid alternative backend if you want to defer platform work — one dep handles all three OS targets"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3, Cross-Platform
+[FILE] src/platform/platform.zig  (interface)
+      src/platform/win32.zig      (Windows backend)
+      src/platform/linux.zig      (X11 / Wayland backend)
+      src/platform/macos.zig      (Cocoa / Metal surface backend)
+
+Design a cross-platform window abstraction:
+
+1. src/platform/platform.zig — shared interface:
+   pub const Os = @import("builtin").os.tag;
+   pub const WindowCallbacks = struct {
+       on_resize: ?*const fn (u32, u32) void = null,
+       on_close:  ?*const fn () void        = null,
+   };
+   pub const Window = switch (Os) {
+       .windows => @import("win32.zig").Window,
+       .linux   => @import("linux.zig").Window,
+       .macos   => @import("macos.zig").Window,
+       else     => @compileError("Unsupported platform"),
+   };
+   // Every backend must expose: init, deinit, poll_events, get_vulkan_instance_exts, create_vulkan_surface
+
+2. src/platform/win32.zig — Windows backend:
+   WNDCLASSEX + CS_OWNDC; WS_OVERLAPPEDWINDOW
+   Messages: WM_SIZE→callbacks.on_resize; WM_DESTROY/WM_CLOSE→on_close
+   RegisterRawInputDevices for RIDEV_NOLEGACY raw mouse
+   get_vulkan_instance_exts: &.{"VK_KHR_surface","VK_KHR_win32_surface"}
+   create_vulkan_surface(instance, out) → vkCreateWin32SurfaceKHR
+
+3. src/platform/linux.zig — X11 backend (Wayland optional later):
+   XOpenDisplay + XCreateWindow + XSelectInput
+   Events: ConfigureNotify→on_resize; ClientMessage(WM_DELETE_WINDOW)→on_close
+   get_vulkan_instance_exts: &.{"VK_KHR_surface","VK_KHR_xlib_surface"}
+   create_vulkan_surface → vkCreateXlibSurfaceKHR
+
+4. src/platform/macos.zig — Cocoa backend (via objc runtime or SDL3):
+   NSApplication + NSWindow (Objective-C via @cImport or zig-objc)
+   get_vulkan_instance_exts: &.{"VK_KHR_surface","VK_EXT_metal_surface"}
+   create_vulkan_surface → vkCreateMetalSurfaceEXT via MoltenVK
+
+[CONSTRAINT] Renderer and all engine code import only platform.zig — never a backend directly
+[DELIVERABLE] Single build.zig compiles on all 3 OS targets; window opens and resizes cleanly; Vulkan surface created without error`},
+
+{id:"m0t1",name:"Main Loop",tag:"platform",
+ desc:"Fixed-timestep accumulator game loop (60 Hz logic tick, uncapped render). Passes interpolation alpha [0,1] to the render call for smooth motion between physics steps.",
+ notes:["FIXED_DT = 1/60 s; accumulate frame delta, update N times per frame","Cap delta to 0.25 s to prevent spiral of death on slow frames","Interpolation alpha = accumulator / FIXED_DT passed to render()","platform.Window.poll_events() is non-blocking — call once per frame iteration"],
+ prompt:`[ENGINE] Strife | Zig master, Cross-Platform
+[FILE] src/engine/loop.zig
+
+Implement fixed-timestep game loop:
+1. FIXED_DT: f64 = 1.0 / 60.0
+2. Frame timing: std.time.Timer (cross-platform in Zig stdlib)
+   var timer = try std.time.Timer.start();
+   delta = @as(f64, @floatFromInt(timer.lap())) / 1e9
+3. Accumulator pattern:
+     while (running) {
+       const delta = @min(timer_lap_s(), 0.25);
+       accum += delta;
+       while (accum >= FIXED_DT) { engine_update(FIXED_DT); accum -= FIXED_DT; }
+       engine_render(@floatCast(accum / FIXED_DT));
+       platform.window.poll_events();  // non-blocking; fires callbacks
+     }
+4. EngineLoop struct: { running: bool, fixed_dt: f64 } with init(), run(), shutdown()
+5. FPS counter: accumulate frames over 1 s; log via log_info
+
+[DELIVERABLE] Stable 60 ticks/s update; FPS logged to console; clean shutdown when on_close fires`},
+
+{id:"m0t2",name:"Input",tag:"platform",
+ desc:"Cross-platform input system with a platform-agnostic event queue. Each platform backend translates OS events into InputEvent values. Edge detection (just_pressed/just_released) works identically on all targets.",
+ notes:["InputEvent: union(enum) { key_down/up: Key, mouse_move: Vec2, mouse_button_down/up: u8, scroll: f32 }","Platform backends push events into the queue; InputSystem drains it each frame","begin_frame(): copy current state to previous; drain event queue","Raw mouse delta: Win32=RAWINPUT, Linux=XInput2 relative motion, macOS=NSEvent deltaX/Y"],
+ prompt:`[ENGINE] Strife | Zig master, Cross-Platform
+[FILE] src/platform/input.zig  (cross-platform layer)
+      src/platform/win32.zig   (push raw WM_INPUT events)
+      src/platform/linux.zig   (push XInput2 relative motion)
+      src/platform/macos.zig   (push NSEvent deltaX/Y)
+
+Implement cross-platform input:
+1. Key enum: WASD, arrows, space, escape, shift, ctrl, alt, F1–F12, mouse L/R/M
+   (values are abstract — backends map OS key codes to this enum)
+2. InputEvent: union(enum) {
+       key_down: Key, key_up: Key,
+       mouse_move: struct { dx: f32, dy: f32 },   // raw delta, no acceleration
+       mouse_button_down: u8, mouse_button_up: u8,
+       scroll: f32,
+   }
+3. InputQueue: { events: [256]InputEvent, count: u32, mu: std.Thread.Mutex }
+   fn push(q, evt: InputEvent) — called from platform backend during poll_events
+4. InputState: { keys_cur: [256]bool, keys_prev: [256]bool, mouse_delta: Vec2, scroll: f32 }
+5. fn input_begin_frame(state, queue):
+   state.keys_prev = state.keys_cur; state.mouse_delta = .{0,0}; state.scroll = 0;
+   Drain queue: for each event update keys_cur/mouse_delta/scroll; queue.count = 0
+6. fn is_down(s, k)bool, fn is_just_pressed(s, k)bool, fn is_just_released(s, k)bool
+7. Backend key mapping example (win32.zig):
+   VK_W→Key.w, VK_A→Key.a, VK_SPACE→Key.space (comptime table)
+
+[DELIVERABLE] WASD just_pressed fires exactly one frame on all 3 OS targets; raw delta unaffected by cursor speed`},
+
+{id:"m0t3",name:"Timer",tag:"platform",
+ desc:"High-resolution timer using std.time.Timer from Zig's stdlib — cross-platform with nanosecond precision. No OS-specific calls needed.",
+ notes:["std.time.Timer.start() initialises; .lap() returns nanoseconds since last lap — no per-platform code","Wraps to f64 seconds: @as(f64, @floatFromInt(timer.lap())) / 1e9","Monotonic on all targets — immune to NTP / wall-clock jumps","Use timer_tick() as the sole delta source for the main loop"],
+ prompt:`[ENGINE] Strife | Zig master, Cross-Platform
+[FILE] src/platform/timer.zig
+
+Implement high-resolution timer using Zig stdlib only:
+1. Timer struct: { inner: std.time.Timer }
+2. fn timer_init() !Timer — .inner = try std.time.Timer.start()
+3. fn timer_tick(t: *Timer) f64:
+   ns: u64 = t.inner.lap()
+   return @as(f64, @floatFromInt(ns)) / 1_000_000_000.0
+4. fn timer_now_s(t: *Timer) f64 — .inner.read() converted to seconds (does not reset lap)
+5. fn timer_elapsed_ms(t: *Timer) f64 — .inner.read() / 1_000_000.0
+6. fn timer_sleep_ms(ms: u64) void — std.time.sleep(ms * std.time.ns_per_ms)
+
+No platform-specific code. std.time.Timer uses:
+  Windows  → QueryPerformanceCounter internally
+  Linux    → clock_gettime(CLOCK_MONOTONIC)
+  macOS    → mach_absolute_time()
+
+[DELIVERABLE] timer_tick() returns ~0.0167 at 60 fps on all 3 OS targets; two consecutive calls without sleep return < 0.001 s`},
+
+{id:"m0t4",name:"Logging",tag:"core",
+ desc:"Structured logger with levels (Debug/Info/Warn/Error), source location via @src(), and ANSI color terminal output. Debug calls compile to nothing in ReleaseFast.",
+ notes:["@src() gives file + line for free — no macro tricks needed","Levels: Debug=cyan, Info=white, Warn=yellow, Error=red (ANSI escapes)","Compile-time filtering: if level==.debug and mode!=Debug then return","log_debug/log_info/log_warn/log_err shorthand wrappers passing @src() automatically"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/core/log.zig
+
+Implement structured logging:
+1. LogLevel enum: .debug, .info, .warn, .err
+2. fn log(comptime level: LogLevel, comptime fmt: []const u8, args: anytype, src: std.builtin.SourceLocation) void
+   Format: "[WARN] src/foo.zig:42 — message"
+   ANSI colors per level (write to stderr)
+3. Comptime strip: if (level == .debug) if (@import("builtin").mode != .Debug) return;
+4. Shorthand macros (call with @src()):
+   pub fn log_debug(comptime fmt: []const u8, args: anytype) void { log(.debug, fmt, args, @src()); }
+   Same for log_info, log_warn, log_err
+5. Optional file sink: append to "strife.log" alongside stderr
+
+[CONSTRAINT] Zero runtime cost for debug logs in ReleaseFast — verified by checking generated assembly
+[DELIVERABLE] Colored output with file:line; log_debug call absent from ReleaseFast binary`},
+
+{id:"m0t5",name:"Assertions",tag:"core",
+ desc:"Debug assertions using @src() for zero-boilerplate file/line context. Triggers @breakpoint() in Debug, compiles to nothing in ReleaseFast.",
+ notes:["strife_assert(cond, msg, @src()) is the primary form","strife_panic always fires even in release (unrecoverable error)","@breakpoint() lets a debugger catch it before unwinding the stack","All compile out in ReleaseFast — no runtime overhead"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/core/assert.zig
+
+Implement assertions:
+1. pub fn strife_assert(cond: bool, comptime msg: []const u8, src: std.builtin.SourceLocation) void
+   In Debug: if (!cond) { log_err("ASSERT: {s} @ {s}:{d}", .{msg,src.file,src.line}); @breakpoint(); }
+   In Release: empty body (comptime if on std.builtin.mode)
+2. pub fn strife_assertf(cond: bool, comptime fmt: []const u8, args: anytype, src: std.builtin.SourceLocation) void
+3. pub fn strife_panic(comptime msg: []const u8) noreturn — always active, prints + @panic
+4. pub fn strife_unreachable(src: std.builtin.SourceLocation) noreturn — for exhaustive switch arms
+
+Usage: strife_assert(ptr != null, "ptr must not be null", @src());
+
+[DELIVERABLE] @breakpoint fires in Debug on failed assert; zero instructions in ReleaseFast binary`},
+
+{id:"m0t6",name:"Filesystem",tag:"core",
+ desc:"File I/O utilities built on std.fs: read-entire-file, write, exists check, and path manipulation. Foundation for the asset pipeline and config loading.",
+ notes:["read_file_alloc returns caller-owned []u8 — caller frees","path_ext / path_stem needed by the asset manager","make_dirs for output directories","Handle std.fs errors ergonomically — no raw zig error leaks to callers"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/core/fs.zig
+
+Implement filesystem utilities:
+1. read_file_alloc(alloc: Allocator, path: []const u8) ![]u8 — cwd().openFile + readToEndAlloc; caller frees
+2. write_file(path: []const u8, data: []const u8) !void — createFile + writeAll
+3. file_exists(path: []const u8) bool — cwd().access, catch return false
+4. make_dirs(path: []const u8) !void — std.fs.cwd().makePath
+5. path_ext(path: []const u8) []const u8 — last '.' to end; "" if none
+6. path_stem(path: []const u8) []const u8 — after last '/' up to last '.'
+7. path_join(alloc: Allocator, parts: []const []const u8) ![]u8 — join with '/' separator
+
+[DELIVERABLE] read_file_alloc("assets/test.txt") returns correct content; make_dirs creates nested dirs`},
+
+{id:"m0t7",name:"Math",tag:"core",
+ desc:"Vec2/3/4, Mat4 (column-major for Vulkan/GLSL), Quaternion. perspective_vk flips Y and maps depth to [0,1] for correct Vulkan NDC.",
+ notes:["Column-major: m[col][row] — matches GLSL layout(column_major)","perspective_vk MUST negate Y (Vulkan Y-down) and set depth range [0,1] not [-1,1]","Quat: from_euler, to_mat4, slerp, mul, normalize","AABB3 struct for future culling: { min, max: Vec3 }"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3 / GLSL
+[FILE] src/math/math.zig (or split vec/mat/quat)
+
+Implement math library:
+1. Vec2/Vec3/Vec4: packed struct { x,y,z,w: f32 }
+   Methods: add, sub, scale, dot, length, normalize, lerp; Vec3: cross
+2. Mat4: [4][4]f32 (column-major: m[col][row])
+   identity(), mul(a,b), transpose()
+   translate(v: Vec3), scale(v: Vec3), rotate(angle_rad: f32, axis: Vec3)
+   look_at(eye, center, up: Vec3) -> Mat4
+   perspective_vk(fov_y_rad, aspect, near, far: f32) -> Mat4
+     — negate Y: result[1][1] *= -1 (Vulkan Y-down NDC)
+     — depth [0,1]: different projection formula than GL
+3. Quat: { x,y,z,w: f32 }
+   from_euler(Vec3) Quat, to_mat4(Quat) Mat4, mul, slerp, normalize
+4. AABB3: { min, max: Vec3 } — contains_point, intersects_aabb
+
+[CONSTRAINT] perspective_vk must produce correct results — test: cube at z=-5 visible with 45° FOV
+[DELIVERABLE] Unit test: identity * vec == vec; perspective_vk NDC depth in [0,1]; look_at correct`},
+
+{id:"m0t8",name:"Memory",tag:"core",
+ desc:"Arena allocator for per-frame scratch, pool allocator for fixed-size objects. The existing DebugAllocator must be heap-allocated to prevent self-pointer invalidation when parent structs move.",
+ notes:["Arena: reset() each frame start — no individual frees needed for temp allocs","Pool: free-list embedded in unused slots, O(1) alloc/free","DebugAllocator must live behind a pointer — was previously a stack copy which caused dangling self-pointer","Expose Allocators.frame_arena as the preferred scratch allocator"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/core/memory.zig
+
+Implement custom allocators:
+1. ArenaAllocator: { buf: []u8, offset: usize, backing: Allocator }
+   init(backing, capacity): allocate buf; alloc(size, align) -> []u8 by bumping offset
+   reset(): offset = 0 (called at frame start)
+   toAllocator(): return std.mem.Allocator interface
+2. PoolAllocator(comptime T: type, comptime N: usize):
+   slots: [N]T; free_stack: [N]u16; top: u16
+   get() *T: pop from free_stack; release(*T): push index back
+3. Ensure DebugAllocator (GPA) is stored as *GPA not GPA — add to heap in engine init:
+   const gpa = try std.heap.page_allocator.create(std.heap.GeneralPurposeAllocator(.{}));
+   gpa.* = .{};
+4. Allocators struct: { frame: ArenaAllocator, general: *std.heap.GeneralPurposeAllocator(.{}) }
+
+[CONSTRAINT] Moving ArenaAllocator after init is safe (no self-pointers); GPA must NOT be moved
+[DELIVERABLE] arena.reset() resets correctly; pool get/release O(1); GPA leak check clean at shutdown`},
+
+{id:"m0t9",name:"Job System",tag:"core",
+ desc:"Thread pool with a shared job queue (Mutex + Condition). Enables parallel ECS system execution and async asset loading.",
+ notes:["Spawn N = cpu_count-1 worker threads at init","Job: { func: *const fn(*anyopaque)void, ctx: *anyopaque }","wait_all() spins until queue empty AND all workers idle (atomic counter)","Shutdown: set running=false, broadcast, join all threads"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/core/jobs.zig
+
+Implement thread pool:
+1. Job: { func: *const fn(*anyopaque) void, ctx: *anyopaque }
+2. JobQueue: { list: std.ArrayList(Job), mu: std.Thread.Mutex, cv: std.Thread.Condition }
+3. ThreadPool: { threads: []std.Thread, queue: JobQueue, active: std.atomic.Value(u32), running: std.atomic.Value(bool) }
+4. init(alloc, n: usize): spawn n workers
+   Worker: while running: mu.lock; while list.empty and running: cv.wait; pop job; mu.unlock; active.inc; job.func(job.ctx); active.dec; cv.broadcast
+5. submit(func, ctx): queue.mu.lock; push; cv.signal; mu.unlock
+6. wait_all(): while queue.list.len > 0 or active.load() > 0: std.Thread.yield()
+7. deinit(): running=false; cv.broadcast; join all
+
+[DELIVERABLE] submit 1000 jobs across 4 workers; wait_all() correctly synchronizes; no data races (tested with --sanitize-thread)`},
+
+{id:"m0t10",name:"Config",tag:"core",
+ desc:"INI-format config parser. Loads strife.ini at startup for window dimensions, vsync, log level, and physics tick rate.",
+ notes:["Sections: [window], [renderer], [physics], [audio]","get_int/get_float/get_bool/get_string with fallback defaults","Stored as StringHashMap([]u8) keyed by 'section.key'","Reloadable at runtime without restart (hot-reload friendly)"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/core/config.zig
+
+Implement INI config loader:
+1. Parse lines: skip '#' comments; '[section]' sets current section; 'key = value' stored as "section.key" -> value
+   Trim whitespace from keys and values (std.mem.trim)
+2. Config: { map: std.StringHashMap([]const u8), arena: std.heap.ArenaAllocator }
+   config_load(alloc, path) !Config
+   config_deinit(cfg: *Config)
+3. get_str(cfg, section, key, default) []const u8
+   get_int(cfg, section, key, default: i64) i64  — std.fmt.parseInt
+   get_float(cfg, section, key, default: f64) f64 — std.fmt.parseFloat
+   get_bool(cfg, section, key, default: bool) bool — "true"/"1"=true
+
+Sample strife.ini:
+[window]
+width = 1280
+height = 720
+[renderer]
+vsync = true
+[physics]
+tick_rate = 60
+
+[DELIVERABLE] get_int("window","width",800) == 1280; missing key returns default; malformed value uses default`},
+
+{id:"m0t11",name:"UUID",tag:"core",
+ desc:"UUID v4 generator for stable asset IDs, entity identities, and save-data references. 128-bit random with standard 8-4-4-4-12 hex string format.",
+ notes:["std.crypto.random for entropy — cryptographically random","Set version nibble (0x40) and variant bits (0x80) per RFC 4122","Round-trip: uuid_new() → uuid_to_str → uuid_parse == original","Used by AssetManager, scene serializer, and save system"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/core/uuid.zig
+
+Implement UUID v4:
+1. UUID struct: { bytes: [16]u8 }
+2. uuid_new() UUID:
+   std.crypto.random.bytes(&bytes)
+   bytes[6] = (bytes[6] & 0x0F) | 0x40  // version 4
+   bytes[8] = (bytes[8] & 0x3F) | 0x80  // variant RFC 4122
+3. uuid_to_buf(uuid, buf: *[36]u8) void — write xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (no alloc)
+4. uuid_to_str(uuid, alloc) ![]u8 — allocated version for JSON serialization
+5. uuid_parse(s: []const u8) !UUID — parse 36-char string; error if wrong format
+6. uuid_nil() UUID — all zeros (invalid sentinel)
+7. uuid_eql(a, b: UUID) bool — std.mem.eql
+
+[DELIVERABLE] uuid_new() round-trips parse(to_str(id)) == id; nil UUID detectable; 1M calls produce no duplicates`}
+]},
+
+{n:1,name:"ECS",icon:"◈",tasks:[
+{id:"m1t0",name:"Entity",tag:"ecs",
+ desc:"Initialize the Flecs world and wrap entity creation in idiomatic Zig. Every engine entity is a Flecs ecs_entity_t (u64) living in one shared world.",
+ notes:["ecs_init() returns the world; ecs_fini() shuts it down","ecs_progress(world, dt) advances all registered systems","entity_new_named for debug-readable entities","@ptrCast required for Flecs opaque pointer types in Zig"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs via C bindings (flecs.h)
+[FILE] src/ecs/world.zig
+
+Initialize Flecs world:
+1. @cImport flecs.h (or use a flecs.zig wrapper already in the project)
+2. World struct: { raw: *c.ecs_world_t }
+3. world_init() World — c.ecs_init()
+4. world_deinit(w: *World) — c.ecs_fini(w.raw)
+5. world_progress(w: *World, dt: f32) bool — c.ecs_progress(w.raw, dt)
+6. entity_new(w) c.ecs_entity_t — c.ecs_new_id(w.raw)
+7. entity_new_named(w, name: [:0]const u8) c.ecs_entity_t
+8. entity_destroy(w, e) — c.ecs_delete(w.raw, e) (deferred until end of frame)
+9. entity_alive(w, e) bool — c.ecs_is_alive(w.raw, e)
+
+[CONSTRAINT] Zig-C boundary: opaque Flecs types need @ptrCast; name strings must be null-terminated [:0]const u8
+[DELIVERABLE] World init/fini; 10 named entities created and destroyed; world_progress runs without crash`},
+
+{id:"m1t1",name:"Component Storage",tag:"ecs",
+ desc:"Register Zig structs as Flecs components. Flecs handles archetype-based storage automatically — we expose add/get/remove helpers with type safety.",
+ notes:["ecs_component_init with size + alignment of the Zig struct","get_component returns ?*T — null if entity lacks that component","Components are POD Zig structs — no heap allocations inside them","Start with Transform, Velocity, Health as test types"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs C bindings
+[FILE] src/ecs/components.zig
+
+Define component registration helpers:
+1. fn register_component(world: *c.ecs_world_t, comptime T: type, name: [:0]const u8) c.ecs_entity_t:
+   var desc = std.mem.zeroes(c.ecs_component_desc_t);
+   desc.entity = c.ecs_entity_init(world, &.{.name = name});
+   desc.type.size = @sizeOf(T); desc.type.alignment = @alignOf(T);
+   return c.ecs_component_init(world, &desc);
+2. fn set_component(world, entity, comptime T: type, comp_id, value: T) void — ecs_set_id with @ptrCast
+3. fn get_component(world, entity, comptime T: type, comp_id) ?*const T — ecs_get_id; null if missing
+4. fn get_component_mut(world, entity, comptime T: type, comp_id) ?*T — ecs_get_mut_id
+5. fn remove_component(world, entity, comp_id) — ecs_remove_id
+6. fn has_component(world, entity, comp_id) bool — ecs_has_id
+
+Register + test: Transform {pos:Vec3,rot:Quat,scale:Vec3}, Velocity {v:Vec3}, Health {cur:f32,max:f32}
+
+[DELIVERABLE] add/get/remove work correctly; get returns null for missing component; no memory corruption`},
+
+{id:"m1t2",name:"Sparse Set",tag:"ecs",
+ desc:"Flecs uses archetype tables internally — this task validates our component layout produces cache-friendly access patterns and documents the archetype strategy.",
+ notes:["Flecs stores entities with same component set in contiguous tables (archetypes)","Mixing component combos at runtime causes archetype fragmentation — avoid add/remove in hot loops","10,000 entity Transform+Velocity query should process in < 1 ms","Tag components (zero-size) for entity categories instead of adding/removing data components"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/ecs/bench.zig (benchmark) + src/ecs/README.md (document)
+
+Validate Flecs archetype layout:
+1. Benchmark in src/ecs/bench.zig:
+   - Create 10,000 entities each with Transform + Velocity
+   - Query all Transform+Velocity; update pos += vel * dt
+   - Time with std.time.Timer; assert < 1 ms per iteration
+2. Test archetype fragmentation: create 100 entities, add/remove a component mid-frame, re-query
+   Verify count is still correct
+3. Add src/ecs/README.md with our archetype strategy:
+   - Component sets on hot entities should be STABLE (no runtime add/remove)
+   - Use tag components (zero-size structs registered as Flecs components) for categories: IsPlayer, IsEnemy, IsProjectile
+   - Per-frame structural changes: use ecs_defer_begin/end or batch with ecs_bulk_init
+4. Deferred operations example: ecs_defer_begin(world); ... bulk adds ...; ecs_defer_end(world)
+
+[DELIVERABLE] Benchmark output in log; 10k entity update < 1ms; README documents archetype strategy`},
+
+{id:"m1t3",name:"Queries",tag:"ecs",
+ desc:"Cached Flecs queries for system iteration. Created once at startup, iterated each frame. Supports required, optional, and NOT component terms.",
+ notes:["Create queries with ecs_query_init — do NOT create per-frame","ecs_query_iter → ecs_query_next loop pattern; ecs_field to access typed data","Optional terms: query can match entities with or without a component","Destroy queries with ecs_query_fini at shutdown"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs C bindings
+[FILE] src/ecs/query.zig
+
+Implement query helpers:
+1. QueryTerm struct: { comp_id: c.ecs_entity_t, kind: enum{required, optional, not_has} }
+2. fn build_query(world, terms: []const QueryTerm) *c.ecs_query_t:
+   Build ecs_query_desc_t.filter.terms array from QueryTerm slice; call ecs_query_init
+3. QueryIter: { raw: c.ecs_iter_t, valid: bool }
+4. fn query_iter(q: *c.ecs_query_t) QueryIter — ecs_query_iter
+5. fn iter_next(it: *QueryIter) bool — ecs_query_next; sets it.valid
+6. fn iter_field(it: *QueryIter, comptime T: type, idx: i32) [*]T — ecs_field with @ptrCast
+7. fn iter_entity(it: *QueryIter, i: usize) c.ecs_entity_t — it.raw.entities[i]
+
+Test: query all Transform+Velocity, iterate 10k entities, mutate Transform.pos each iteration
+
+[DELIVERABLE] Query iterates correct entity set; optional terms work; NOT terms exclude correctly`},
+
+{id:"m1t4",name:"Scheduler",tag:"ecs",
+ desc:"Flecs pipeline system for ordering ECS systems by phase. Systems are C callbacks registered with ecs_system_init and run automatically via world_progress.",
+ notes:["Built-in phases: EcsPreUpdate → EcsUpdate → EcsPostUpdate","Systems read/write component declarations allow Flecs to auto-parallelize","ecs_depends_on for explicit ordering between systems in the same phase","Deferred add/remove: wrap structural changes in ecs_defer_begin/end"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs C bindings
+[FILE] src/ecs/scheduler.zig
+
+Implement system registration:
+1. SystemDesc: { name: [:0]const u8, phase: c.ecs_entity_t, query_terms: []const QueryTerm, func: c.ecs_iter_action_t }
+2. fn register_system(world, desc: SystemDesc) c.ecs_entity_t:
+   Build ecs_system_desc_t with the query terms and phase; ecs_system_init
+3. Standard phases to use: c.EcsPreUpdate, c.EcsUpdate, c.EcsPostUpdate, c.EcsOnValidate
+4. Ordering between systems: ecs_add_pair(world, sys_b, c.EcsDependsOn, sys_a)
+5. Register test systems in order:
+   InputSystem (PreUpdate): read input, write Velocity
+   MovementSystem (Update): pos += vel * dt; depends on InputSystem
+   RenderSystem (PostUpdate): read Transform, print positions
+6. Each system callback: extern fn my_system(it: *c.ecs_iter_t) callconv(.C) void
+
+[DELIVERABLE] Systems run in correct phase order; MovementSystem correctly depends on InputSystem`},
+
+{id:"m1t5",name:"Events",tag:"ecs",
+ desc:"Flecs observers for component lifecycle (OnAdd/OnRemove/OnSet) and custom gameplay events (damage, death, collision). Replaces raw callback function pointers.",
+ notes:["ecs_observer_init with the event type (EcsOnAdd / custom event id)","Custom events: create an entity as the event type, emit with ecs_emit","Observer receives ecs_iter_t — target entity is it.entities[i]","Decouple gameplay systems: DamageEvent fired by combat, consumed by audio/VFX/UI independently"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs C bindings
+[FILE] src/ecs/events.zig
+
+Implement Flecs observer/event system:
+1. fn register_observer(world, event: c.ecs_entity_t, comp_id: c.ecs_entity_t, func: c.ecs_iter_action_t) c.ecs_entity_t
+   Builds ecs_observer_desc_t with filter term on comp_id, event; calls ecs_observer_init
+2. Lifecycle observers:
+   register_observer(world, c.EcsOnAdd, health_id, on_health_added)
+   register_observer(world, c.EcsOnRemove, health_id, on_entity_died)
+3. Custom event type:
+   const damage_event = c.ecs_new_id(world);  // event entity
+4. DamagePayload: { amount: f32, source: c.ecs_entity_t }
+5. fn emit_damage(world, target, payload: DamagePayload) void:
+   ecs_emit(world, &.{ .event = damage_event, .entity = target, .param = @ptrCast(&payload) })
+6. Observer receives payload: const p: *DamagePayload = @ptrCast(it.param)
+
+[DELIVERABLE] OnAdd fires when Health added; OnRemove fires on delete; DamageEvent emits and is received with correct amount`},
+
+{id:"m1t6",name:"Transform",tag:"ecs",
+ desc:"Transform component (pos/rot/scale) and a system that derives a WorldMatrix Mat4 each frame. The WorldMatrix is what the renderer reads for draw calls.",
+ notes:["Transform: { pos: Vec3, rot: Quat, scale: Vec3 } — author-facing values","WorldMatrix: { mat: Mat4 } — derived every frame by TransformSystem","System writes to WorldMatrix with ecs_get_mut (auto-creates if missing via ecs_ensure)","Runs in EcsPreUpdate so hierarchy and renderer systems see up-to-date matrices"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs ECS
+[FILE] src/ecs/transform.zig
+
+Implement transform system:
+1. Transform component: { pos: Vec3, rot: Quat, scale: Vec3 }
+2. WorldMatrix component: { mat: Mat4 }
+3. TransformSystem callback (EcsPreUpdate): query all entities with Transform
+   For each entity i:
+     const t = iter_field(&it, Transform, 0)[i];
+     const mat = mat4_mul(mat4_mul(mat4_translate(t.pos), quat_to_mat4(t.rot)), mat4_scale(t.scale));
+     var wm = get_component_mut(world, entity, WorldMatrix, wm_id) orelse ecs_ensure_id(...)
+     wm.mat = mat;
+4. Helper: transform_set_pos, transform_set_rot, transform_set_euler, transform_get_forward
+5. Transform default: pos={0,0,0}, rot=identity, scale={1,1,1}
+
+[DELIVERABLE] Entity with Transform gets correct WorldMatrix; rotating quat produces correct rotation matrix`},
+
+{id:"m1t7",name:"Hierarchy",tag:"ecs",
+ desc:"Flecs parent-child relationships (EcsChildOf) for scene hierarchy. Children's WorldMatrix is computed as parent.WorldMatrix × local_transform.",
+ notes:["ecs_add_pair(child, EcsChildOf, parent) — built into Flecs","HierarchySystem runs AFTER TransformSystem (use EcsDependsOn)","Query parented entities with (ChildOf, *) wildcard term","entity_get_world_pos: extract translation column from WorldMatrix"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs C bindings
+[FILE] src/ecs/hierarchy.zig
+
+Implement transform hierarchy:
+1. fn set_parent(world, child, parent: c.ecs_entity_t) — ecs_add_pair(child, c.EcsChildOf, parent)
+2. fn remove_parent(world, child) — ecs_remove_pair(child, c.EcsChildOf, c.EcsWildcard)
+3. fn get_children(world, parent) ecs_iter_t — ecs_children(world, parent)
+4. HierarchySystem (EcsPreUpdate, depends on TransformSystem):
+   Query: entities WITH Transform AND (ChildOf, *) — parented entities only
+   For each: parent_entity = ecs_get_parent(world, entity)
+             parent_wm = get_component(world, parent_entity, WorldMatrix)
+             local = compute_local_transform(transform)
+             entity_wm.mat = mat4_mul(parent_wm.mat, local)
+5. fn entity_get_world_pos(world, entity) Vec3 — col 3 of WorldMatrix
+6. fn entity_get_world_rot(world, entity) Quat — extract from WorldMatrix upper-left 3x3
+
+[DELIVERABLE] 3-level hierarchy: grandchild world pos = grandparent.pos + parent.offset + child.offset`}
+]},
+
+{n:2,name:"Assets",icon:"📦",tasks:[
+{id:"m2t0",name:"Asset Manager",tag:"assets",
+ desc:"Handle-based asset manager with reference counting and async loading via the job system. Handles are typed (AssetHandle(GpuMesh)) and stable across reloads.",
+ notes:["AssetHandle: index + generation — detects stale handles","load_asset is non-blocking; get_asset returns null until state == .ready","HashMap<path, slot_index> for deduplication","Reference counting: release_asset decrements; unloads if count reaches 0"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/assets/asset_manager.zig
+
+Implement handle-based asset manager:
+1. AssetHandle(comptime T): { index: u32, gen: u16, _type: u16 }
+   Comptime type tag prevents mixing handle types
+2. AssetState enum: .unloaded, .loading, .ready, .failed
+3. AssetSlot: { ptr: ?*anyopaque, ref_count: u32, state: AssetState, uuid: UUID, path_hash: u64 }
+4. AssetManager: { slots: ArrayList(AssetSlot), by_path: StringHashMap(u32), alloc: Allocator, jobs: *ThreadPool }
+5. fn load_asset(mgr, comptime T, path) AssetHandle(T):
+   Check by_path for cache hit (inc ref, return handle); else alloc slot, submit load job
+6. fn get_asset(mgr, comptime T, h: AssetHandle(T)) ?*T:
+   Validate gen; return @ptrCast(slot.ptr) if .ready else null
+7. fn release_asset(mgr, h): decrement ref_count; if 0: call type-specific unload fn; set .unloaded
+8. fn asset_manager_update(mgr): check completed job futures, transition .loading → .ready
+
+[DELIVERABLE] load("cube.glb") returns handle; immediate get returns null; after update get returns valid ptr`},
+
+{id:"m2t1",name:"Mesh Import",tag:"assets",
+ desc:"Load OBJ and glTF 2.0 meshes into interleaved vertex buffers (pos/normal/uv) and upload to GPU device-local memory via VMA staging.",
+ notes:["cgltf for glTF (C library — easy @cImport)","Vertex: { pos:[3]f32, normal:[3]f32, uv:[2]f32 } — 32 bytes interleaved","Staging buffer pattern: CPU upload → VkCmdCopyBuffer → device-local","GpuMesh owns VkBuffer + VmaAllocation; freed in asset_unload"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3, VMA, cgltf
+[FILE] src/assets/mesh_import.zig + src/renderer/gpu_mesh.zig
+
+Implement mesh import:
+1. Vertex: packed struct { pos:[3]f32, normal:[3]f32, uv:[2]f32 }
+2. MeshData: { vertices: []Vertex, indices: []u32, alloc: Allocator } + deinit()
+3. load_obj(alloc, path) !MeshData — parse "v"/"vn"/"vt"/"f" lines; build indexed buffer
+4. load_gltf(alloc, path) !MeshData — cgltf_parse_file + cgltf_load_buffers; extract first primitive
+5. upload_mesh(device, vma, queue, cmd_pool, data: MeshData) !GpuMesh:
+   a. Staging: vmaCreateBuffer(VMA_MEMORY_USAGE_CPU_ONLY, size) + memcpy verts+indices
+   b. Device: vmaCreateBuffer(VMA_MEMORY_USAGE_GPU_ONLY, VK_BUFFER_USAGE_VERTEX|INDEX|TRANSFER_DST)
+   c. One-shot cmd: vkCmdCopyBuffer; submit; vkDeviceWaitIdle; destroy staging
+6. GpuMesh: { vbo, ibo: VkBuffer, vbo_alloc, ibo_alloc: VmaAllocation, index_count: u32 }
+
+[DELIVERABLE] cube.obj loads; GpuMesh.index_count correct; render call draws correct geometry; no VMA validation errors`},
+
+{id:"m2t2",name:"Texture Import",tag:"assets",
+ desc:"Load PNG/JPG via stb_image and upload as mipmapped VkImage (RGBA8). Mip chain generated via vkCmdBlitImage. Full GpuTexture includes view and sampler.",
+ notes:["stb_image.h C binding: stbi_load → *u8; stbi_image_free","VK_FORMAT_R8G8B8A8_UNORM with mip levels = floor(log2(max(w,h)))+1","Blit-based mip generation requires VK_IMAGE_USAGE_TRANSFER_SRC_BIT on the image","VkSampler created alongside: LINEAR filter, VK_SAMPLER_MIPMAP_MODE_LINEAR"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3, VMA, stb_image
+[FILE] src/assets/texture_import.zig + src/renderer/gpu_texture.zig
+
+Implement texture loading:
+1. stbi_load binding via @cImport("stb_image.h") — define STB_IMAGE_IMPLEMENTATION in a .c file
+2. TextureData: { pixels: [*]u8, w: u32, h: u32, channels: u32 } + fn free()
+3. upload_texture(device, vma, queue, cmd_pool, data) !GpuTexture:
+   a. mip_levels = @as(u32, @intFromFloat(@floor(@log2(@as(f32,@floatFromInt(@max(w,h))))))) + 1
+   b. Create VkImage: RGBA8_UNORM, TILING_OPTIMAL, TRANSFER_SRC|DST|SAMPLED, mip_levels
+   c. Staging buffer: VMA CPU_ONLY, memcpy pixels
+   d. Barrier UNDEFINED→TRANSFER_DST (all mips); vkCmdCopyBufferToImage mip 0
+   e. Generate mips: loop vkCmdBlitImage(mip i→i+1) with barrier between each
+   f. Final barrier: TRANSFER_SRC→SHADER_READ_ONLY
+   g. Create VkImageView (all mips, COLOR_BIT)
+   h. Create VkSampler (LINEAR min/mag, MIPMAP_MODE_LINEAR, REPEAT, maxLod=mip_levels)
+4. GpuTexture: { image, view, sampler: Vk*, alloc: VmaAllocation, w,h,mips: u32 }
+
+[DELIVERABLE] rock.png loads; mips visible at distance; validation layers silent`},
+
+{id:"m2t3",name:"Shader Import",tag:"assets",
+ desc:"Compile GLSL shaders to SPIR-V via glslc at build time. Runtime loads .spv bytecode and creates VkShaderModule. ShaderCache deduplicates.",
+ notes:["build.zig ShaderCompileStep: run glslc for all .vert/.frag in assets/shaders/","Output to zig-out/shaders/*.spv","Runtime: read .spv; verify len%4==0; vkCreateShaderModule","ShaderCache: HashMap(path, VkShaderModule) — share modules across pipelines"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] build.zig (compile step) + src/assets/shader_import.zig
+
+Implement shader pipeline:
+1. In build.zig: add a build step that iterates all files in "assets/shaders/" matching *.vert|*.frag|*.comp
+   For each: b.addSystemCommand(&.{"glslc", src, "-o", out, "--target-env=vulkan1.3", "-O"})
+   Output: zig-out/shaders/name.vert.spv etc.
+   Add step as dependency of the main exe step
+2. fn shader_load(device: VkDevice, path: []const u8) !VkShaderModule:
+   bytes = fs.read_file_alloc(alloc, path)
+   strife_assert(bytes.len % 4 == 0, "SPIR-V must be 4-byte aligned", @src())
+   VkShaderModuleCreateInfo { .codeSize = bytes.len, .pCode = @ptrCast(@alignCast(bytes)) }
+   vkCreateShaderModule
+3. ShaderCache: { map: StringHashMap(VkShaderModule), device: VkDevice }
+   fn shader_get_or_load(cache, path) !VkShaderModule — check map first
+4. fn shader_destroy(device, module) — vkDestroyShaderModule
+
+[DELIVERABLE] zig build compiles all shaders; shader_load("zig-out/shaders/tri.vert.spv") returns valid module`},
+
+{id:"m2t4",name:"Material Assets",tag:"assets",
+ desc:"Material definition as JSON: shader + texture refs + PBR scalar values. Runtime creates descriptor sets binding the UBO and textures.",
+ notes:["Material JSON: { albedo_texture, metallic, roughness, shader }","MaterialUBO: { albedo_color:[4]f32, metallic:f32, roughness:f32 } — std140","Descriptor set: binding 0 = UBO (FRAGMENT), binding 1 = albedo sampler (FRAGMENT)","MaterialComponent in ECS: handle to loaded MaterialGpu"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3, std.json
+[FILE] src/assets/material.zig + src/renderer/material_gpu.zig
+
+Implement material asset:
+1. MaterialDef: parse assets/materials/my_mat.json via std.json.parseFromSlice
+   { "albedo": "assets/textures/rock.png", "metallic": 0.0, "roughness": 0.8, "shader": "lit" }
+2. MaterialUBO (std140): { albedo_color: [4]f32, metallic: f32, roughness: f32, _pad: [8]u8 }
+3. MaterialGpu: { descriptor_set: VkDescriptorSet, ubo_buf: VkBuffer, ubo_alloc: VmaAllocation }
+4. fn create_material_gpu(device, vma, desc_pool, desc_layout, def, albedo: GpuTexture) !MaterialGpu:
+   a. Alloc descriptor set from pool
+   b. Create persistently-mapped VMA CPU_TO_GPU UBO buffer
+   c. Write MaterialUBO values to mapped ptr
+   d. vkUpdateDescriptorSets: binding 0 = UBO, binding 1 = albedo image+sampler
+5. MaterialComponent (ECS): { handle: AssetHandle(MaterialGpu) }
+6. fn material_gpu_update_ubo(mat, metallic, roughness) — update mapped buffer without recreation
+
+[DELIVERABLE] rock material binds; fragment shader reads correct albedo color and roughness value`},
+
+{id:"m2t5",name:"Animation Assets",tag:"assets",
+ desc:"Load glTF skeletal animation data: joint hierarchy (skeleton), inverse bind matrices, and keyframe tracks (translation/rotation/scale per joint).",
+ notes:["cgltf_skin for skeleton; cgltf_animation for clips","JointTrack: times[]f32 + values[]f32 (3 floats for T/S, 4 for R) + interpolation mode","AnimationClip: array of tracks + duration in seconds","Skeleton: parent_indices[]i32 where -1 = root joint"],
+ prompt:`[ENGINE] Strife | Zig master, cgltf C bindings
+[FILE] src/assets/animation_import.zig
+
+Implement glTF animation loading:
+1. Skeleton: { joint_count: u32, parent_indices: []i32, inv_bind_mats: []Mat4, names: [][]const u8 }
+2. JointTrack: { joint_idx: u32, property: enum{translation,rotation,scale}, times: []f32, values: []f32, interp: enum{linear,step,cubic} }
+3. AnimationClip: { name: []const u8, tracks: []JointTrack, duration: f32 }
+4. fn load_skeleton(alloc, data: *c.cgltf_data) !Skeleton:
+   Iterate data.skins[0].joints; fill parent_indices; extract inverse_bind_matrices
+5. fn load_clips(alloc, data: *c.cgltf_data) ![]AnimationClip:
+   For each cgltf_animation: fill JointTrack array from channels+samplers; compute duration = max input time
+6. fn interpolate_vec3(track, time) Vec3 — binary search + linear interp
+7. fn interpolate_quat(track, time) Quat — binary search + slerp
+
+[DELIVERABLE] cesium-man.glb loads skeleton with correct parent chain; walk clip has > 30 keyframes per joint`},
+
+{id:"m2t6",name:"Hot Reload",tag:"assets",
+ desc:"Cross-platform asset hot-reload via periodic mtime polling (std.fs.File.stat). No OS-specific watcher API — poll every 100ms on a background thread, push changed paths to a queue.",
+ notes:["std.fs.File.stat().mtime is cross-platform; no inotify/ReadDirectoryChanges/FSEvents needed","Background thread polls; main thread drains changes queue each frame via Mutex","Shader change: rerun glslc → rebuild VkShaderModule → rebuild affected pipelines","Debounce: skip if same path reloaded within last 300ms (mtime can jitter on some FS)"],
+ prompt:`[ENGINE] Strife | Zig master, Cross-Platform
+[FILE] src/assets/hot_reload.zig
+
+Implement cross-platform hot reload via mtime polling:
+1. WatchedFile: { path: []const u8, last_mtime: i128 }
+2. HotReloader: { watched: ArrayList(WatchedFile), queue: ArrayList([]const u8), mu: std.Thread.Mutex, thread: std.Thread, running: std.atomic.Value(bool) }
+3. fn hot_reload_watch(hr, path) — add to watched list with current mtime
+4. Background thread (runs every 100ms):
+   For each WatchedFile:
+     stat = std.fs.cwd().statFile(path) catch continue
+     if stat.mtime != file.last_mtime:
+       file.last_mtime = stat.mtime
+       mu.lock(); queue.append(path); mu.unlock()
+   std.time.sleep(100 * std.time.ns_per_ms)
+5. fn hot_reload_poll(hr, asset_mgr, renderer) void (call per frame):
+   mu.lock(); defer mu.unlock()
+   For each changed path in queue:
+     if std.mem.endsWith(u8, path, ".vert") or ".frag" or ".comp":
+       recompile glslc → reload ShaderModule → mark pipeline dirty
+     if ".png" or ".jpg" or ".ktx2":
+       reload stb_image → re-upload to existing GpuTexture slot
+     if ".glb" or ".obj":
+       reload cgltf/obj parser → re-upload to existing GpuMesh slot
+   queue.clearRetainingCapacity()
+6. Debounce: per-path HashMap(path, last_reload_ns); skip if < 300ms since last reload
+
+[CONSTRAINT] Zero OS-specific APIs — works identically on Windows, Linux, macOS
+[DELIVERABLE] Edit rock.png → texture updates in running engine within ~200ms; no crash on rapid saves`}
+]},
+
+{n:3,name:"Renderer",icon:"▣",tasks:[
+{id:"m3t0",name:"Swapchain",tag:"renderer",
+ desc:"Triple-buffered Vulkan swapchain (VK_PRESENT_MODE_MAILBOX_KHR preferred). Handles OUT_OF_DATE and SUBOPTIMAL results from acquire/present by rebuilding.",
+ notes:["Already implemented — harden resize and error handling","FRAMES_IN_FLIGHT=2 for double-buffered submission independent of image count","Separate per-frame semaphores from per-image tracking","VK_PRESENT_MODE_FIFO_KHR as fallback when mailbox unavailable"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] src/renderer/swapchain.zig
+
+Review and harden swapchain:
+1. Swapchain: { handle: VkSwapchainKHR, images: []VkImage, views: []VkImageView, format: VkFormat, extent: VkExtent2D }
+2. Per-frame sync: FrameSync[FRAMES_IN_FLIGHT] { image_ready: VkSemaphore, render_done: VkSemaphore, fence: VkFence }
+3. fn swapchain_acquire(sc, sync: FrameSync, timeout: u64) !u32:
+   vkAcquireNextImageKHR → if OUT_OF_DATE: return error.SwapchainOutOfDate
+4. fn swapchain_present(sc, queue, img_idx, render_done_sem) !void:
+   vkQueuePresentKHR → if OUT_OF_DATE or SUBOPTIMAL: return error.SwapchainOutOfDate
+5. fn swapchain_rebuild(sc, device, surface, w, h): destroy old views+swapchain; recreate
+6. Caller (render loop) catches error.SwapchainOutOfDate and calls rebuild + skips frame
+
+[CONSTRAINT] FRAMES_IN_FLIGHT sync objects are separate from swapchain image count
+[DELIVERABLE] Resize window 10x: no validation errors, no deadlock, correct image layout transitions`},
+
+{id:"m3t1",name:"Pipelines",tag:"renderer",
+ desc:"Graphics pipeline builder for Vulkan 1.3 dynamic rendering (no VkRenderPass needed). PipelineBuilder pattern with chainable config. PipelineCache serialized to disk.",
+ notes:["VkPipelineRenderingCreateInfoKHR: specify color + depth formats, no render pass object","PipelineLayout: one for opaque (push constant MVP), one for UI (orthographic UBO)","PipelineCache: vkCreatePipelineCache; serialize to zig-out/pipeline_cache.bin for fast restarts","Default: depth test ON, cull back faces, front face CCW for Vulkan (or CW — decide once)"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3 Dynamic Rendering
+[FILE] src/renderer/pipeline.zig
+
+Implement pipeline builder:
+1. PipelineBuilder struct with fields for all state + fn build(device) !VkPipeline
+2. Key config methods:
+   set_shaders(vert, frag: VkShaderModule)
+   set_vertex_input(bindings: []VkVertexInputBindingDescription, attrs: []VkVertexInputAttributeDescription)
+   set_cull_mode(VkCullModeFlags, VkFrontFace)
+   set_depth_test(test: bool, write: bool, op: VkCompareOp)
+   set_blend(enabled: bool)
+   set_color_format(fmt: VkFormat)
+   set_depth_format(fmt: VkFormat)
+   set_layout(VkPipelineLayout)
+3. In build(): attach VkPipelineRenderingCreateInfoKHR to pNext — no renderpass
+4. PipelineCache: { handle: VkPipelineCache }
+   fn pipeline_cache_load(device, path) PipelineCache — read bin file or create empty
+   fn pipeline_cache_save(device, cache, path) — vkGetPipelineCacheData + write to file
+5. fn pipeline_destroy(device, pipeline)
+
+[DELIVERABLE] Lit opaque pipeline + debug line pipeline both build; cache file written and reloaded on restart`},
+
+{id:"m3t2",name:"Command Buffers",tag:"renderer",
+ desc:"Per-frame command buffer management with separate pools per frame-in-flight. One-shot utility for upload operations. Sync2 barriers throughout.",
+ notes:["One VkCommandPool per frame-in-flight — reset pool at frame start (never individual buffers)","Already partially implemented — verify per-pool reset is correct","One-shot: begin → record → submit → vkDeviceWaitIdle → free","Use vkCmdPipelineBarrier2 (VK_KHR_synchronization2, core in 1.3)"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] src/renderer/command.zig
+
+Review and finalize command buffer system:
+1. FrameCommands: { pool: VkCommandPool, cmd: VkCommandBuffer }
+   Separate pool per frame-in-flight: commands_init returns [FRAMES_IN_FLIGHT]FrameCommands
+2. fn frame_begin(fc: *FrameCommands) VkCommandBuffer:
+   vkResetCommandPool(RELEASE_RESOURCES_BIT)
+   vkBeginCommandBuffer(ONE_TIME_SUBMIT_BIT)
+3. fn frame_submit(device, queue, fc, wait_sem, signal_sem, fence) — vkQueueSubmit2
+4. fn cmd_immediate_begin(device, pool) VkCommandBuffer — one-shot upload commands
+5. fn cmd_immediate_end(device, queue, pool, cmd) — submit + vkDeviceWaitIdle + vkFreeCommandBuffers
+6. fn cmd_barrier_image(cmd, img, src_stage, dst_stage, src_access, dst_access, old_layout, new_layout):
+   Use VkImageMemoryBarrier2 + vkCmdPipelineBarrier2 (sync2 — no deprecated stage masks)
+
+[DELIVERABLE] Frame cycle runs clean; resize doesn't deadlock; upload commands use one-shot correctly; sync2 barriers no validation warnings`},
+
+{id:"m3t3",name:"Meshes",tag:"renderer",
+ desc:"Bind vertex+index buffers and issue indexed draw calls. Per-entity model matrix via push constants. RenderQueue batched from ECS query each frame.",
+ notes:["vkCmdBindVertexBuffers + vkCmdBindIndexBuffer before each draw","Push constant: { model: Mat4 } — 64 bytes, VERTEX stage","RenderQueue: ArrayList(RenderCommand) built by ECS query, flushed to GPU in PostUpdate","Indexed draw: vkCmdDrawIndexed(index_count, 1, 0, 0, 0)"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] src/renderer/draw.zig + src/ecs/render_system.zig
+
+Implement mesh draw submission:
+1. RenderCommand: { mesh: *GpuMesh, material: *MaterialGpu, model_mat: Mat4 }
+2. RenderQueue: { cmds: ArrayList(RenderCommand) } — reset each frame
+3. RenderSystem (EcsPostUpdate): query entities with WorldMatrix + MeshRenderer
+   For each: push RenderCommand to queue
+4. fn render_queue_flush(cmd_buf: VkCommandBuffer, queue: *RenderQueue, pipeline_layout: VkPipelineLayout):
+   For each rc:
+     vkCmdBindVertexBuffers(cmd_buf, 0, 1, &rc.mesh.vbo, &[_]u64{0})
+     vkCmdBindIndexBuffer(cmd_buf, rc.mesh.ibo, 0, .uint32)
+     vkCmdBindDescriptorSets(... rc.material.descriptor_set ...)
+     vkCmdPushConstants(cmd_buf, layout, VERTEX_BIT, 0, 64, &rc.model_mat)
+     vkCmdDrawIndexed(cmd_buf, rc.mesh.index_count, 1, 0, 0, 0)
+5. MeshRenderer component (ECS): { mesh: AssetHandle(GpuMesh), material: AssetHandle(MaterialGpu) }
+
+[DELIVERABLE] 100 entities with distinct model matrices render in one frame; push constants correct per draw`},
+
+{id:"m3t4",name:"Materials",tag:"renderer",
+ desc:"Descriptor set layout + pool for materials: UBO at binding 0 (FRAGMENT), combined image sampler at binding 1 (FRAGMENT). Shared layout across all standard materials.",
+ notes:["One VkDescriptorSetLayout shared by all lit materials","Pool pre-allocates max_materials sets to avoid runtime allocation","UBO update via persistently mapped VMA buffer — no staging needed for per-frame updates","CameraUBO at set 0; MaterialDescriptor at set 1"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] src/renderer/descriptors.zig
+
+Implement descriptor management:
+1. fn create_material_layout(device) VkDescriptorSetLayout:
+   binding 0: UNIFORM_BUFFER, stageFlags=FRAGMENT
+   binding 1: COMBINED_IMAGE_SAMPLER, stageFlags=FRAGMENT
+2. fn create_descriptor_pool(device, max_sets: u32) VkDescriptorPool:
+   poolSizes: UNIFORM_BUFFER × max_sets, COMBINED_IMAGE_SAMPLER × max_sets
+3. fn alloc_material_set(device, pool, layout) VkDescriptorSet — vkAllocateDescriptorSets
+4. fn write_material_set(device, set, ubo_buf, ubo_size, img_view, sampler):
+   2× vkWriteDescriptorSet; call vkUpdateDescriptorSets
+5. PipelineLayout: { handle, set_layouts: [2]VkDescriptorSetLayout, push_range: VkPushConstantRange }
+   Set 0 = CameraUBO layout; Set 1 = MaterialLayout
+6. fn pipeline_layout_create(device, cam_layout, mat_layout) PipelineLayout
+
+[DELIVERABLE] Descriptor sets bind; fragment shader reads UBO metallic value; sampler samples correct texel`},
+
+{id:"m3t5",name:"Camera",tag:"renderer",
+ desc:"Camera ECS component + system that uploads a CameraUBO (view + proj matrices) each frame. Debug fly-cam for WASD + mouse look during development.",
+ notes:["CameraUBO: { view: Mat4, proj: Mat4 } — set 0, binding 0, VERTEX|FRAGMENT stage","Fly-cam: pitch clamped to ±89°; yaw unbounded","perspective_vk from math.zig — Y-flip + [0,1] depth","Aspect ratio read from swapchain extent each frame"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3, Flecs
+[FILE] src/renderer/camera.zig + src/ecs/camera_system.zig
+
+Implement camera:
+1. Camera component: { fov_y: f32 = 1.0472, near: f32 = 0.1, far: f32 = 1000.0, yaw: f32, pitch: f32, active: bool }
+2. CameraUBO: { view: Mat4, proj: Mat4 } — std140 compatible
+3. CameraGpu: { ubo_buf: VkBuffer, ubo_alloc: VmaAllocation, mapped_ptr: *CameraUBO, descriptor_set: VkDescriptorSet }
+4. CameraSystem (EcsPreUpdate): query active Camera + Transform entity:
+   forward = rotate Vec3(0,0,-1) by quat_from_euler(.{pitch, yaw, 0})
+   view = look_at(pos, pos+forward, up={0,1,0})
+   proj = perspective_vk(fov_y, swapchain.extent.w / swapchain.extent.h, near, far)
+   *camera_gpu.mapped_ptr = .{ .view=view, .proj=proj }
+5. Fly-cam input (debug only): WASD → move along forward/right; mouse_delta → yaw/pitch
+   Pitch: clamp to [-1.484, 1.484] (~85°)
+6. Camera descriptor: set 0, binding 0, UNIFORM_BUFFER, VERTEX|FRAGMENT
+
+[DELIVERABLE] Camera matrix updates each frame; rotating yaw keeps cube visible; perspective correct in Vulkan NDC`},
+
+{id:"m3t6",name:"Lighting",tag:"renderer",
+ desc:"One directional light + ambient in the fragment shader. SceneLightUBO uploaded each frame. Blinn-Phong shading model (PBR extension deferred).",
+ notes:["LightUBO: { dir_dir:[4]f32, dir_color:[4]f32, ambient:[4]f32 } — std140 with padding","Bound at set 0, binding 2 (or merge into CameraUBO set)","Fragment shader: NdotL diffuse + ambient","Direction stored as normalized Vec3 (pointing toward light source, not away from it)"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] src/renderer/lighting.zig + assets/shaders/lit.vert + assets/shaders/lit.frag
+
+Implement directional lighting:
+1. SceneLightUBO (std140): { dir_direction: [4]f32, dir_color: [4]f32, ambient_color: [4]f32 }
+   Upload per frame to set 0 binding 2 (persistently mapped VMA buffer)
+2. In lit.vert: output world-space normal as flat out v_normal: vec3
+   v_normal = normalize(mat3(transpose(inverse(model))) * in_normal)
+   (or pass normal matrix as push constant to avoid per-frame inverse)
+3. In lit.frag:
+   vec3 N = normalize(v_normal);
+   vec3 L = normalize(-lights.dir_direction.xyz);
+   float NdotL = max(dot(N,L), 0.0);
+   vec3 diffuse = NdotL * lights.dir_color.rgb * albedo.rgb;
+   vec3 ambient = lights.ambient_color.rgb * albedo.rgb;
+   frag_color = vec4(diffuse + ambient, 1.0);
+4. SceneLight struct: { direction: Vec3, color: Vec3, ambient: Vec3 } — Zig-side representation
+
+[DELIVERABLE] Mesh lit from one direction; rotating light rotates shading; ambient prevents full black shadow side`},
+
+{id:"m3t7",name:"Shadows",tag:"renderer",
+ desc:"Directional shadow map: depth-only pass renders scene to 2048×2048 shadow texture; main pass samples it with 3×3 PCF for soft shadows.",
+ notes:["Shadow map: VK_FORMAT_D32_SFLOAT, 2048×2048, DEPTH_STENCIL_ATTACHMENT + SAMPLED usage","Orthographic light-space matrix: scene AABB projected from light direction","Separate depth-only VkPipeline (no fragment shader) for shadow pass","PCF 3×3 kernel: 9 shadow samples averaged; bias 0.005 to prevent self-shadowing"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] src/renderer/shadow.zig + assets/shaders/shadow.vert + lit.frag (update)
+
+Implement shadow mapping:
+1. ShadowMap: { image: VkImage, view: VkImageView, sampler: VkSampler, alloc: VmaAllocation }
+   Format: D32_SFLOAT; Usage: DEPTH_STENCIL_ATTACHMENT_BIT | SAMPLED_BIT; 2048×2048
+   Sampler: CLAMP_TO_BORDER, border=white, DEPTH_COMPARE_OP_LESS, LINEAR filter
+2. fn light_space_matrix(dir: Vec3, scene_center: Vec3, radius: f32) Mat4:
+   view = look_at(scene_center - dir * radius, scene_center, up)
+   proj = orthographic(-r,r,-r,r,0.1,radius*2) with Vulkan NDC clip
+3. Shadow pipeline: depth-only (no frag shader), vertex multiplies by light_space_mvp
+4. Shadow pass each frame:
+   barrier UNDEFINED→DEPTH_ATTACHMENT; dynamic render (depth only); draw all opaque; end
+   barrier DEPTH_ATTACHMENT→SHADER_READ_ONLY
+5. In lit.frag: sample shadow map at set 1 binding 0
+   vec4 lsPos = lightSpaceMatrix * vec4(v_world_pos, 1.0);
+   vec3 projCoords = lsPos.xyz / lsPos.w; projCoords.xy = projCoords.xy * 0.5 + 0.5;
+   PCF: average 9 shadow2DProj samples in 3×3 texel grid; bias -= 0.005
+
+[DELIVERABLE] Directional shadow visible on floor; PCF removes aliasing; no shadow acne or peter-panning`},
+
+{id:"m3t8",name:"Debug Draw",tag:"renderer",
+ desc:"Immediate-mode line renderer for debug overlays. draw_line/draw_box/draw_sphere/draw_axes helpers. Persistent-mapped host-visible VBO flushed per frame.",
+ notes:["LineVertex: { pos:[3]f32, color:[3]f32 } — 24 bytes","MAX_LINES=65536; VBO is persistently mapped VMA CPU_TO_GPU buffer","Simple pass-through vertex shader; fragment outputs vertex color","All debug calls compile to nothing in non-Debug builds"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] src/renderer/debug_draw.zig + assets/shaders/debug.vert + assets/shaders/debug.frag
+
+Implement debug line renderer:
+1. LineVertex: packed struct { pos: [3]f32, color: [3]f32 }
+2. DebugDraw: { verts: [MAX_LINES*2]LineVertex, count: u32, vbo: VkBuffer, alloc: VmaAllocation, mapped: [*]LineVertex }
+   MAX_LINES = 65536; VBO persistently mapped (VMA_ALLOCATION_CREATE_MAPPED_BIT | CPU_TO_GPU)
+3. fn dd_line(dd, a, b: Vec3, color: Vec3) — append 2 verts; guard count < MAX_LINES
+4. fn dd_box(dd, min, max: Vec3, color) — 12 edge lines
+5. fn dd_sphere(dd, center: Vec3, radius: f32, color, segs: u32) — sin/cos loop
+6. fn dd_axes(dd, mat: Mat4, scale: f32) — 3 colored lines along local X(red)/Y(green)/Z(blue)
+7. fn dd_flush(dd, cmd_buf, pipeline, pipeline_layout):
+   @memcpy(dd.mapped[0..dd.count], dd.verts[0..dd.count])
+   vkCmdDraw(cmd_buf, dd.count, 1, 0, 0); dd.count = 0
+8. debug.vert: gl_Position = cam_proj * cam_view * vec4(pos,1); pass color through
+9. Wrap all dd_* functions: if (@import("builtin").mode != .Debug) return;
+
+[DELIVERABLE] dd_axes at origin draws 3 colored lines; dd_box around cube visible; zero overhead in ReleaseFast`}
+]},
+
+{n:4,name:"Animation",icon:"◎",tasks:[
+{id:"m4t0",name:"Skeletons",tag:"anim",
+ desc:"Skeleton data structure with joint hierarchy, inverse bind matrices, and runtime skin matrix computation. SkinMatrices component uploaded to GPU as a UBO/SSBO.",
+ notes:["Skeleton: parent_indices[]i32, inv_bind_mats[]Mat4, names[][]const u8","PoseBuffer component: array of JointTransform { pos:Vec3, rot:Quat, scale:Vec3 }","SkinMatrices component: matrices[128]Mat4 — forward-pass computed each frame","Bind pose: all local transforms = identity → skin matrices = I"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3, Flecs
+[FILE] src/animation/skeleton.zig
+
+Implement skeleton system:
+1. Skeleton (asset): { joint_count: u32, parent_indices: []i32, inv_bind_mats: []Mat4, names: [][]const u8 }
+2. JointTransform: { pos: Vec3, rot: Quat, scale: Vec3 }
+3. PoseBuffer component (ECS): { transforms: []JointTransform } — one per joint, in joint order
+4. SkinMatrices component (ECS): { mats: [128]Mat4 } — uploaded to skinning UBO
+5. fn compute_skin_matrices(skel: *Skeleton, pose: []JointTransform, out: []Mat4) void:
+   world_joints: [128]Mat4 = undefined
+   For i in 0..joint_count:
+     local = mat4_trs(pose[i].pos, pose[i].rot, pose[i].scale)
+     parent = if (parent_indices[i] < 0) identity else world_joints[parent_indices[i]]
+     world_joints[i] = mat4_mul(parent, local)
+     out[i] = mat4_mul(world_joints[i], inv_bind_mats[i])
+6. SkeletonSystem (EcsUpdate): for each entity with PoseBuffer + Skeleton:
+   compute_skin_matrices(skeleton, pose, &skin_matrices.mats)
+
+[DELIVERABLE] Bind pose produces identity skin matrices; parent-child joint transforms concatenate correctly`},
+
+{id:"m4t1",name:"Animation Player",tag:"anim",
+ desc:"Sample an AnimationClip at the current playback time. Linear interpolation between keyframes. Writes result to the entity's PoseBuffer.",
+ notes:["AnimPlayer: { clip, time, speed, loop, playing } component","Binary search for keyframe bracket; lerp Vec3; slerp Quat","Loop: time = fmod(time, duration) when loop=true","Runs before SkeletonSystem (phase ordering via DependsOn)"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/animation/anim_player.zig
+
+Implement animation sampling:
+1. AnimPlayer component: { clip: ?*AnimationClip, time: f32, speed: f32 = 1.0, loop: bool = true, playing: bool }
+2. fn find_keyframe_bracket(times: []f32, t: f32) struct{lo:usize, hi:usize, alpha:f32}:
+   Binary search for largest i where times[i] <= t; alpha = (t - times[lo])/(times[hi]-times[lo])
+3. fn sample_vec3(track: JointTrack, t: f32) Vec3 — lerp between keyframes
+4. fn sample_quat(track: JointTrack, t: f32) Quat — slerp between keyframes
+5. fn sample_clip(clip: *AnimationClip, t: f32, pose: []JointTransform):
+   For each track: write to pose[track.joint_idx].{pos/rot/scale} based on track.property
+6. AnimPlayerSystem (EcsUpdate, runs BEFORE SkeletonSystem):
+   time += dt * speed
+   if loop: time = @mod(time, clip.duration)
+   sample_clip(clip, time, pose_buffer.transforms)
+
+[DELIVERABLE] Player samples walk clip; joint 0 animates continuously; looping wraps without pop`},
+
+{id:"m4t2",name:"Blend Tree",tag:"anim",
+ desc:"1D blend space blending two clips by a float parameter (e.g. movement speed → idle/walk/run). Blends PoseBuffers after sampling each clip.",
+ notes:["blend_poses: lerp Vec3 components, slerp Quat between two pose arrays","BlendTree1D: list of (clip, param_value) pairs; input param selects bracket pair","For Strife: param = movement speed → blend idle(0)→walk(1)→run(2)","BlendTree system writes blended result to entity's PoseBuffer"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/animation/blend_tree.zig
+
+Implement 1D blend tree:
+1. fn blend_poses(a, b: []const JointTransform, alpha: f32, out: []JointTransform):
+   For each joint i:
+     out[i].pos = lerp(a[i].pos, b[i].pos, alpha)
+     out[i].rot = quat_slerp(a[i].rot, b[i].rot, alpha)
+     out[i].scale = lerp(a[i].scale, b[i].scale, alpha)
+2. BlendPoint: { clip: *AnimationClip, param: f32 }
+3. BlendTree1D: { points: []BlendPoint, current_param: f32, scratch_a: []JointTransform, scratch_b: []JointTransform }
+4. fn blend_tree_evaluate(tree: *BlendTree1D, t: f32, joint_count: u32, out: []JointTransform):
+   Find bracket: largest i where points[i].param <= current_param
+   Sample points[i] into scratch_a, points[i+1] into scratch_b
+   alpha = (param - points[i].param) / (points[i+1].param - points[i].param)
+   blend_poses(scratch_a, scratch_b, alpha, out)
+5. BlendTreeComponent (ECS): { tree: BlendTree1D, param_source: enum{speed,manual} }
+
+[DELIVERABLE] param=0 → full idle pose; param=1 → full walk pose; param=0.5 → smooth blend`},
+
+{id:"m4t3",name:"State Machine",tag:"anim",
+ desc:"Animation state machine with states (clip/blend tree) and transitions triggered by ECS component conditions. Blend between states over blend_duration seconds.",
+ notes:["Transition condition: fn(world, entity) bool — reads ECS state (speed, grounded, attacking)","During transition: blend from_pose → to_pose over blend_duration using blend_poses","ASMComponent stores current state and a captured snapshot of the exiting pose","State IDs are u32 constants defined per character type"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/animation/state_machine.zig
+
+Implement animation state machine:
+1. ASMState: { id: u32, name: []const u8, evaluate: *const fn(*ASMState, f32, []JointTransform)void }
+   evaluate = either play clip or evaluate blend tree
+2. ASMTransition: { from: u32, to: u32, duration: f32, condition: *const fn(*c.ecs_world_t, c.ecs_entity_t)bool }
+3. AnimStateMachine: { states: []ASMState, transitions: []ASMTransition, current_id: u32, prev_pose: []JointTransform, blend_timer: f32, blend_dur: f32, in_transition: bool }
+4. ASMSystem (EcsUpdate):
+   a. Evaluate current state → current_pose
+   b. Check transitions for current state: if condition() == true → start transition (snapshot prev_pose)
+   c. If in_transition: blend_timer += dt; alpha = blend_timer / blend_dur
+      blend_poses(prev_pose, current_pose, alpha, final_pose)
+      if alpha >= 1.0: in_transition=false
+   d. Write final_pose to PoseBuffer
+
+[DELIVERABLE] idle→walk on W key; blend over 0.2s; walk→idle when W released; no pose pop at transition`},
+
+{id:"m4t4",name:"Animation Events",tag:"anim",
+ desc:"Keyframe callbacks embedded in animation clips: footstep sounds, VFX triggers, weapon enable/disable. Dispatched via Flecs events when animation time crosses the event timestamp.",
+ notes:["AnimEvent: { time: f32, name: [:0]const u8 } stored in AnimationClip","AnimEventState component: { last_time: f32 } tracks already-fired events","Handle loop wraparound: fire events in [last_time..duration] ∪ [0..new_time]","ecs_emit AnimEvent — gameplay observers react independently"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/animation/anim_events.zig
+
+Implement animation events:
+1. AnimEvent: { time: f32, name: [:0]const u8, param: f32 } — add events field to AnimationClip
+2. AnimEventState component: { last_time: f32 }
+3. In AnimPlayerSystem, after advancing time, fire events in range:
+   fn fire_events_in_range(world, entity, clip, lo: f32, hi: f32):
+     For each event in clip.events:
+       if event.time > lo and event.time <= hi: ecs_emit(world, anim_event_id, entity, &event)
+   Handle loop: if new_time < last_time (loop wrap):
+     fire_events_in_range(world, entity, clip, last_time, clip.duration)
+     fire_events_in_range(world, entity, clip, 0, new_time)
+   Else: fire_events_in_range(world, entity, clip, last_time, new_time)
+4. Global registry: AnimEventRegistry { map: StringHashMap(Handler) }
+   fn register_anim_event(name, handler: *const fn(c.ecs_entity_t, *AnimEvent)void)
+5. Master observer: on anim_event_id → lookup name in registry → call handler
+
+[DELIVERABLE] "footstep" event fires at frame 8 and 24 of walk cycle; no double-fire on loop; handler plays audio`}
+]},
+
+{n:5,name:"Physics",icon:"⬡",tasks:[
+{id:"m5t0",name:"Collision",tag:"physics",
+ desc:"Jolt Physics integration via a thin C++ wrapper. Initialize the world, register sphere/box/capsule shapes, create rigid bodies, and sync positions to Flecs Transform.",
+ notes:["Jolt is C++ — create jolt_wrapper.cpp exporting extern C functions","PhysicsBody component: { body_id: u32, is_static: bool }","PhysicsSyncSystem: after Jolt step, write body position/rotation to Transform","Step physics in EcsUpdate at fixed dt (same as game loop FIXED_DT)"],
+ prompt:`[ENGINE] Strife | Zig master, Jolt Physics (C++ wrapper pattern)
+[FILE] src/physics/jolt_wrapper.cpp + src/physics/jolt_wrapper.h + src/physics/physics_world.zig
+
+Integrate Jolt Physics:
+1. jolt_wrapper.cpp: thin C-callable layer over Jolt C++ API
+   extern "C" {
+     JoltCtx* jolt_init();
+     void jolt_deinit(JoltCtx*);
+     void jolt_step(JoltCtx*, float dt, int substeps);
+     uint32_t jolt_add_box(JoltCtx*, float hw,hh,hd, float mass, float px,py,pz);
+     uint32_t jolt_add_sphere(JoltCtx*, float radius, float mass, float px,py,pz);
+     uint32_t jolt_add_capsule(JoltCtx*, float r, float h, float mass, float px,py,pz);
+     void jolt_get_position(JoltCtx*, uint32_t body_id, float* px,*py,*pz);
+     void jolt_get_rotation(JoltCtx*, uint32_t body_id, float* qx,*qy,*qz,*qw);
+     void jolt_remove_body(JoltCtx*, uint32_t body_id);
+   }
+2. Zig physics_world.zig: @cImport jolt_wrapper.h; wrap in PhysicsWorld struct
+3. PhysicsBody component (ECS): { body_id: u32, is_static: bool }
+4. PhysicsSyncSystem (EcsPostUpdate):
+   jolt_step(ctx, FIXED_DT, 1)
+   For each entity with PhysicsBody + Transform:
+     jolt_get_position/rotation → write to Transform.pos, Transform.rot
+
+[DELIVERABLE] Sphere body falls 9.81 m/s²; bounces off static floor; Transform syncs correctly`},
+
+{id:"m5t1",name:"Raycast",tag:"physics",
+ desc:"Cast a ray against the physics world and return the first hit: entity, world position, surface normal, and distance fraction.",
+ notes:["jolt_raycast: takes origin + direction + max_dist, returns first hit","body_id → entity mapping stored in PhysicsWorld HashMap","RaycastHit: { entity, point, normal, fraction } — fraction [0,1] of max_dist","raycast_all variant for multi-hit cases (AOE targeting)"],
+ prompt:`[ENGINE] Strife | Zig master, Jolt via wrapper
+[FILE] src/physics/raycast.zig + jolt_wrapper.cpp (extend)
+
+Implement physics raycasting:
+1. Add to jolt_wrapper.cpp:
+   struct JoltRayHit { bool hit; uint32_t body_id; float px,py,pz,nx,ny,nz,fraction; };
+   extern "C" JoltRayHit jolt_raycast(JoltCtx*, float ox,oy,oz, float dx,dy,dz, float max_dist);
+2. PhysicsWorld: add HashMap(u32, c.ecs_entity_t) body_to_entity
+   fn register_body(pw, body_id, entity) — call after jolt_add_*
+3. RaycastHit: { entity: c.ecs_entity_t, point: Vec3, normal: Vec3, fraction: f32, hit: bool }
+4. fn raycast(pw: *PhysicsWorld, origin, dir: Vec3, max_dist: f32) RaycastHit:
+   raw = jolt_raycast(ctx, ...); if !raw.hit: return .{.hit=false}
+   entity = body_to_entity.get(raw.body_id) orelse 0
+   return .{ .entity=entity, .point=..., .normal=..., .fraction=raw.fraction, .hit=true }
+5. fn raycast_all(pw, origin, dir, max_dist, max_hits) []RaycastHit — collect multiple hits
+6. Debug: dd_line(origin, origin + dir*max_dist, if(hit.hit) green else red)
+
+[DELIVERABLE] Ray from camera center hits floor; hit.entity valid; hit.normal points up (0,1,0)`},
+
+{id:"m5t2",name:"Character Controller",tag:"physics",
+ desc:"Jolt CharacterVirtual for the player: capsule shape, gravity, slope handling, step-up, ground detection. Input drives desired velocity, Jolt resolves collisions.",
+ notes:["CharacterVirtual: no rigid body ID — separate Jolt API path","Expose: set_velocity(Vec3), update(dt), is_grounded() bool, get_position() Vec3","Movement: camera-relative WASD in ECS MovementSystem sets velocity, controller resolves","Jump: only if is_grounded(); apply upward impulse once"],
+ prompt:`[ENGINE] Strife | Zig master, Jolt CharacterVirtual
+[FILE] src/physics/character_controller.zig + jolt_wrapper.cpp (extend)
+
+Implement character controller:
+1. In jolt_wrapper.cpp: wrap JPH::CharacterVirtual
+   extern "C" {
+     JoltChar* jolt_char_create(JoltCtx*, float radius, float height, float px,py,pz);
+     void jolt_char_set_velocity(JoltChar*, float vx,vy,vz);
+     void jolt_char_update(JoltChar*, JoltCtx*, float dt);
+     void jolt_char_get_position(JoltChar*, float* px,py,pz);
+     bool jolt_char_is_grounded(JoltChar*);
+     void jolt_char_destroy(JoltChar*);
+   }
+2. CharacterController component (ECS): { char_ptr: *anyopaque, speed: f32=5.0, jump_v: f32=5.0, vel: Vec3 }
+3. fn cc_update(world, entity, dt, input, camera_yaw):
+   dir2d = rotate_xz(wasd_input, camera_yaw)
+   vel.xz = dir2d * speed (sprint: * 2.0)
+   if is_grounded and jump_pressed: vel.y = jump_v
+   else: vel.y -= 9.81 * dt  // gravity if not grounded
+   jolt_char_set_velocity(cc.char_ptr, vel); jolt_char_update(cc.char_ptr, ctx, dt)
+   Transform.pos = jolt_char_get_position(cc.char_ptr)
+
+[DELIVERABLE] Player moves WASD; slides off slopes > 45°; jumps and lands; doesn't clip through floor`},
+
+{id:"m5t3",name:"Triggers",tag:"physics",
+ desc:"Sensor bodies that detect overlap but do not block movement. ContactListener emits TriggerEnter/TriggerExit Flecs events for game logic to consume.",
+ notes:["Jolt sensor: same as rigid body but with SetIsSensor(true)","ContactListener override: OnContactAdded / OnContactRemoved → push event to lock-free queue","TriggerSystem drains queue each frame, resolves body_ids to entities, emits Flecs events","TriggerEvent: { kind: enum{enter,exit}, trigger_entity, other_entity }"],
+ prompt:`[ENGINE] Strife | Zig master, Jolt, Flecs
+[FILE] src/physics/trigger.zig + jolt_wrapper.cpp (extend)
+
+Implement trigger volumes:
+1. In jolt_wrapper.cpp: sensor body creation
+   extern "C" uint32_t jolt_add_trigger_box(JoltCtx*, float hw,hh,hd, float px,py,pz);
+   Implement using BodyCreationSettings with mIsSensor=true, mMotionType=Static
+2. ContactListener: override OnContactAdded/Removed to push {body_a, body_b, ENTER/EXIT} to a mutex queue
+3. In Zig TriggerSystem (EcsPostUpdate): drain trigger queue each frame
+   For each raw event: lookup entity for each body_id; emit TriggerEvent via Flecs
+4. TriggerEvent (Flecs custom event): { kind: enum{enter,exit}, trigger_ent, other_ent }
+5. TriggerComponent (ECS): { body_id: u32 } — marks entity as a trigger volume
+6. Usage example: register Flecs observer for TriggerEvent; if trigger_ent has PickupTag → collect item
+
+[DELIVERABLE] Walk into trigger → .enter fires; walk out → .exit fires; no false positives from adjacent bodies`},
+
+{id:"m5t4",name:"Collision Layers",tag:"physics",
+ desc:"Jolt layer pair filter table: define which object layers can collide with each other. Prevents projectiles hitting caster, triggers blocking movement, etc.",
+ notes:["Layers: Static(0), Default(1), Player(2), Enemy(3), Projectile(4), Trigger(5)","Matrix: Projectile vs Player = false (self-damage prevention); Trigger vs All = detect-only","CollisionLayer component: { layer: u8 } used when creating physics bodies","Layer matrix documented as a comment table for designer reference"],
+ prompt:`[ENGINE] Strife | Zig master, Jolt
+[FILE] src/physics/collision_layers.zig + jolt_wrapper.cpp (extend)
+
+Implement collision layer filtering:
+1. ObjectLayer enum (C and Zig): Static=0, Default=1, PlayerBody=2, EnemyBody=3, Projectile=4, TriggerVolume=5
+2. In jolt_wrapper.cpp: implement ObjectLayerPairFilterTable
+   Collision matrix (true = can collide):
+   Static     × all       = true
+   Default    × all       = true
+   PlayerBody × Enemy     = true; × Projectile(not owned by player) = true; × Trigger = true(sensor)
+   EnemyBody  × Player    = true; × Projectile(not owned by enemy) = true
+   Projectile × PlayerBody = false(no self-hit); × Static = true; × EnemyBody = true
+   TriggerVolume × all    = true  (sensor, no blocking)
+3. jolt_add_* functions: take layer parameter
+4. CollisionLayer component (ECS): { layer: u8 } — assigned based on entity type
+5. Document layer matrix in src/physics/LAYERS.md
+
+[DELIVERABLE] Player fires projectile; doesn't hit self; enemy projectile hits player; trigger detects but doesn't block`}
+]},
+
+{n:6,name:"Scene",icon:"◫",tasks:[
+{id:"m6t0",name:"Scene Save",tag:"scene",
+ desc:"Serialize the Flecs world state to JSON: entity UUIDs, names, and component data. Asset references stored as UUID strings, not pointers.",
+ notes:["Query all entities with UUIDComponent — those are serializable","Component registry: HashMap(type_name, SerializeFn) — register each serializable component","Asset references: { type: 'asset_ref', uuid: '...' } sentinel in JSON","Human-readable JSON for dev; binary format can be added later for shipping"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs, std.json
+[FILE] src/scene/scene_save.zig
+
+Implement scene serialization:
+1. SerializeFn: *const fn(component_ptr: *anyopaque, writer: anytype) anyerror!void
+2. SerializerRegistry: { map: StringHashMap(SerializeFn) }
+   fn register_serializer(type_name, func) — call at engine init for each serializable component
+3. fn scene_save(world, reg, path) !void:
+   Open file writer; begin JSON object "entities": array
+   Query all entities with UUIDComponent + NameComponent:
+     For each: write { uuid, name, components: {} }
+     For each registered component ID: if entity has it, call SerializeFn to write component JSON
+4. Implement serializers for: Transform, Velocity, Health, Camera, MeshRenderer, RigidBody
+   Transform: { pos:[x,y,z], rot:[x,y,z,w], scale:[x,y,z] }
+5. Asset handle serialization: fn write_asset_ref(handle, writer) — write { "asset_ref": uuid_str }
+6. Output: pretty-printed JSON with 2-space indent
+
+[DELIVERABLE] scene_save writes valid JSON; open in editor shows all entity components; asset refs are UUID strings`},
+
+{id:"m6t1",name:"Scene Load",tag:"scene",
+ desc:"Deserialize scene JSON back to Flecs entities. Recreate components, resolve asset handles by UUID, rebuild physics bodies. Entities get same UUIDs as saved.",
+ notes:["Parse JSON → for each entity: create entity → set UUIDComponent → deserialize components","Asset ref resolution: load_asset_by_uuid(manager, uuid) → AssetHandle","Post-load pass: recreate Jolt bodies from serialized RigidBody data","Name→entity map for resolving parent hierarchy references"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs, std.json
+[FILE] src/scene/scene_load.zig
+
+Implement scene deserialization:
+1. DeserializeFn: *const fn(world, entity, json: std.json.Value, asset_manager) anyerror!void
+2. DeserializerRegistry: { map: StringHashMap(DeserializeFn) }
+   Registered alongside serializers in engine init
+3. fn scene_load(world, deserializer_reg, asset_manager, physics, path) !void:
+   Parse JSON; for each entity object:
+     e = entity_new_named(world, name)
+     set UUIDComponent with stored uuid (so UUID is stable across save/load)
+     for each component key in JSON: lookup deserializer; call with entity + json value
+4. asset_ref deserialization: { "asset_ref": uuid_str } → uuid_parse → load_asset_by_uuid
+5. Post-load physics pass: for each entity with RigidBody component: jolt_add_* with serialized shape data
+6. Parent hierarchy: after all entities created, resolve parent UUID refs → ecs_add_pair(EcsChildOf)
+
+[DELIVERABLE] Save then load: entity count matches; transforms identical; mesh renders correctly; no dangling refs`},
+
+{id:"m6t2",name:"Prefabs",tag:"scene",
+ desc:"Flecs prefab entities that instances inherit from. Instances override specific components. Prefabs defined in JSON and registered in a PrefabRegistry for runtime spawning.",
+ notes:["ecs_add_id(world, prefab, EcsPrefab) — marks as prefab","ecs_add_pair(instance, EcsIsA, prefab) — instance inherits all prefab components","Override: ecs_set on instance hides the prefab value for that component","PrefabRegistry: HashMap(name, ecs_entity_t) — looked up by spawner and ability system"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/scene/prefab.zig
+
+Implement prefab system:
+1. fn prefab_create(world, name: [:0]const u8) c.ecs_entity_t:
+   e = entity_new_named(world, name); ecs_add_id(world, e, c.EcsPrefab)
+2. fn prefab_instantiate(world, prefab: c.ecs_entity_t, pos: Vec3) c.ecs_entity_t:
+   instance = entity_new(world)
+   ecs_add_pair(world, instance, c.EcsIsA, prefab)  // inherit all components
+   Override Transform: set_component(world, instance, Transform, .{.pos=pos, .rot=identity, .scale=one})
+3. fn prefab_load_json(world, asset_manager, path) !c.ecs_entity_t:
+   Parse JSON; create prefab; set each component in JSON on the prefab entity
+4. PrefabRegistry: { map: StringHashMap(c.ecs_entity_t) }
+   fn prefab_register(reg, name, prefab)
+   fn prefab_get(reg, name) ?c.ecs_entity_t
+5. Load prefabs at startup: for each file in "assets/prefabs/*.json" → prefab_load_json + register
+
+[DELIVERABLE] 10 goblin instances inherit Health=50 from prefab; one instance overrides Health=25 without affecting others`},
+
+{id:"m6t3",name:"Spawner",tag:"scene",
+ desc:"SpawnPoint component that instantiates prefabs on a cooldown up to a max_active cap. Tracks spawned entities; respawns when they die.",
+ notes:["SpawnPoint: { prefab_name, cooldown, timer, max_active, active_count, enabled }","SpawnedBy component: { spawner: ecs_entity_t } — reverse link on spawned entity","DeathObserver: when entity with SpawnedBy dies → dec active_count on its spawner","Debug: draw a diamond glyph at each SpawnPoint position in debug mode"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/scene/spawner.zig
+
+Implement spawner system:
+1. SpawnPoint component: { prefab_name: [64]u8, cooldown: f32, timer: f32, max_active: u32, active_count: u32, enabled: bool }
+2. SpawnedBy component: { spawner_entity: c.ecs_entity_t } — set on every spawned entity
+3. SpawnSystem (EcsUpdate):
+   For each entity with SpawnPoint:
+     sp.timer -= dt
+     if sp.enabled and sp.timer <= 0 and sp.active_count < sp.max_active:
+       prefab = prefab_registry_get(sp.prefab_name)
+       if prefab != null:
+         instance = prefab_instantiate(world, prefab, spawn_transform.pos)
+         set_component(world, instance, SpawnedBy, .{.spawner_entity = spawner_entity})
+         sp.active_count += 1; sp.timer = sp.cooldown
+4. DeathObserver (EcsOnRemove, Health):
+   if entity has SpawnedBy: get spawner entity; if alive: spawner.active_count -= 1
+5. fn spawner_enable(world, entity, enabled: bool) — toggle spawner on/off
+
+[DELIVERABLE] Spawner creates 3 goblins; kill all 3; spawner respawns them after cooldown`}
+]},
+
+{n:7,name:"Audio",icon:"♫",tasks:[
+{id:"m7t0",name:"Audio Device",tag:"audio",
+ desc:"miniaudio initialization and WAV/OGG/MP3 playback. AudioClip asset wraps ma_sound. play_sound for fire-and-forget effects.",
+ notes:["miniaudio is a single-header C library — easy @cImport","ma_engine_init is the top-level API (handles device, decoding, mixing)","ma_sound supports streaming from file + in-memory decode","AudioSource ECS component for entities that emit sound (non-positional)"],
+ prompt:`[ENGINE] Strife | Zig master, miniaudio (C binding)
+[FILE] src/audio/audio_device.zig
+
+Integrate miniaudio:
+1. Add miniaudio.h to deps; create src/audio/miniaudio_impl.c with:
+   #define MINIAUDIO_IMPLEMENTATION
+   #include "miniaudio.h"
+2. In audio_device.zig: @cImport({ @cInclude("miniaudio.h"); })
+3. AudioDevice: { engine: c.ma_engine } — heap-allocated (ma_engine must not move)
+   fn audio_init(alloc) !*AudioDevice — ma_engine_init(null, null, engine)
+   fn audio_deinit(dev) — ma_engine_uninit
+4. AudioClip: { sound: c.ma_sound, loaded: bool }
+   fn clip_load(dev, alloc, path: [:0]const u8) !AudioClip — ma_sound_init_from_file
+   fn clip_unload(clip) — ma_sound_uninit
+   fn clip_play(clip) — ma_sound_seek_to_pcm_frame(0); ma_sound_start
+   fn clip_set_volume(clip, v: f32) — ma_sound_set_volume
+   fn clip_set_pitch(clip, p: f32) — ma_sound_set_pitch
+5. AudioSource component (ECS): { clip: ?*AudioClip, looping: bool, volume: f32, auto_play: bool }
+
+[DELIVERABLE] test.wav plays on space press; volume slider works; loop flag plays continuously`},
+
+{id:"m7t1",name:"3D Audio",tag:"audio",
+ desc:"Spatial audio: sounds attenuate with distance and pan based on listener position. Listener follows the active camera. AudioSource3D entities auto-update their ma_sound position.",
+ notes:["ma_sound_set_position for source; ma_engine_listener_set_position for camera","ma_sound_set_positioning(ma_positioning_absolute) for world-space sources","Rolloff model: inverse-square via ma_sound_set_rolloff + min/max distance","Audio3DSystem runs after CameraSystem to use fresh listener position"],
+ prompt:`[ENGINE] Strife | Zig master, miniaudio, Flecs
+[FILE] src/audio/audio_3d.zig
+
+Implement 3D spatial audio:
+1. AudioSource3D component (ECS): { clip: ?*AudioClip, min_dist: f32=1.0, max_dist: f32=40.0, rolloff: f32=1.0, volume: f32=1.0 }
+2. Audio3DSystem (EcsUpdate, after CameraSystem):
+   a. Get active Camera entity → get Transform.pos as listener_pos, forward as listener_dir
+      ma_engine_listener_set_position(engine, 0, pos.x, pos.y, pos.z)
+      ma_engine_listener_set_direction(engine, 0, fwd.x, fwd.y, fwd.z)
+      ma_engine_listener_set_world_up(engine, 0, 0,1,0)
+   b. For each entity with AudioSource3D + Transform + active sound:
+      ma_sound_set_positioning(sound, ma_positioning_absolute)
+      ma_sound_set_position(sound, pos.x, pos.y, pos.z)
+      ma_sound_set_min_distance(sound, src.min_dist)
+      ma_sound_set_max_distance(sound, src.max_dist)
+      ma_sound_set_rolloff(sound, src.rolloff)
+3. fn audio_3d_play_at(dev, clip, pos: Vec3, volume: f32) — fire-and-forget positional sound
+
+[DELIVERABLE] Explosion at (10,0,0) → louder in right ear; move to (10,0,0) → loud center; move to (-20,0,0) → near silent`},
+
+{id:"m7t2",name:"Mixer",tag:"audio",
+ desc:"Audio bus hierarchy using ma_sound_group: Master, Music, SFX, UI. Per-bus volume control persisted to config. All sounds assigned to a bus on load.",
+ notes:["ma_sound_group init with parent group to create bus chain","Music/SFX/UI groups all chain into Master group","AudioClip gets a .bus field set at load time","AudioSettings: { master, music, sfx, ui: f32 } saved to strife.ini"],
+ prompt:`[ENGINE] Strife | Zig master, miniaudio
+[FILE] src/audio/audio_mixer.zig
+
+Implement audio mixer:
+1. AudioBus enum: .master, .music, .sfx, .ui
+2. AudioMixer: { master, music, sfx, ui: c.ma_sound_group }
+   fn mixer_init(dev) !AudioMixer:
+     ma_sound_group_init(engine, 0, null, &master)   // master → output
+     ma_sound_group_init(engine, 0, &master, &music) // music → master
+     ma_sound_group_init(engine, 0, &master, &sfx)   // sfx → master
+     ma_sound_group_init(engine, 0, &master, &ui)    // ui → master
+3. fn mixer_set_volume(mx: *AudioMixer, bus: AudioBus, v: f32):
+   ma_sound_group_set_volume(&mx.bus_field(bus), v)
+4. When loading AudioClip: pass group pointer to ma_sound_init_from_file pGroup param based on clip.bus
+5. AudioSettings: { master: f32=1.0, music: f32=0.8, sfx: f32=1.0, ui: f32=0.9 }
+   fn mixer_apply_settings(mx, s: AudioSettings) — call mixer_set_volume for each bus
+   fn mixer_save_settings(s, config) — write to strife.ini sections [audio]
+   fn mixer_load_settings(config) AudioSettings — read from config
+
+[DELIVERABLE] SFX bus volume=0.0 silences all SFX; music unaffected; settings persist across restarts`}
+]},
+
+{n:8,name:"UI",icon:"▭",tasks:[
+{id:"m8t0",name:"Text",tag:"ui",
+ desc:"Font rendering via stb_truetype: glyph atlas generated at startup, text drawn as quad batches. Text pipeline uses orthographic projection with alpha blending.",
+ notes:["stbtt_BakeFontBitmap bakes to 1024×1024 R8 bitmap → upload as VK_FORMAT_R8_UNORM","Each glyph = 6 vertices (2 tris); 1 draw call per font atlas","UIVertex: { pos:[2]f32, uv:[2]f32, color:[4]f32 }","Text pipeline: ortho 0→W, 0→H, depth compare disabled, alpha blend DST_ALPHA"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3, stb_truetype
+[FILE] src/ui/font.zig + src/ui/text_renderer.zig
+
+Implement font rendering:
+1. @cImport stb_truetype.h; create stb_truetype_impl.c
+2. GlyphInfo: { uv_min: [2]f32, uv_max: [2]f32, offset: [2]f32, advance: f32 } (from stbtt_bakedchar)
+3. FontAtlas: { texture: GpuTexture, glyphs: [128]GlyphInfo, size_px: f32 }
+   fn font_load(alloc, device, vma, cmd_pool, queue, path: [:0]const u8, size_px: f32) !FontAtlas:
+     ttf_data = fs.read_file_alloc(alloc, path)
+     bitmap: [1024*1024]u8 = undefined
+     stbtt_BakeFontBitmap(ttf_data, 0, size_px, &bitmap, 1024, 1024, 32, 96, &baked[0])
+     upload 1024×1024 R8_UNORM texture (single channel)
+4. UIVertex: packed struct { pos: [2]f32, uv: [2]f32, color: [4]f32 }
+5. TextRenderer: { vbo (host-visible mapped, 16k verts), count: u32, pipeline: VkPipeline, proj_ubo }
+6. fn text_draw(tr, atlas, text: []const u8, x, y, scale, color: [4]f32):
+   For each char: look up GlyphInfo; emit 6 verts for quad (pos in screen pixels, uv from atlas)
+7. fn text_flush(tr, cmd_buf) — memcpy verts to VBO; draw; count=0
+8. Orthographic UBO: { proj: Mat4 = ortho(0,width,height,0,-1,1) }
+
+[DELIVERABLE] "STRIFE ENGINE" renders white at top-left; scale param changes size; color param works`},
+
+{id:"m8t1",name:"Images",tag:"ui",
+ desc:"UI sprite quads: draw textured rectangles at screen positions. Icons, crosshairs, ability portraits. Shares vertex format and pipeline with text renderer.",
+ notes:["UIVertex: same as text renderer — share the vertex buffer and pipeline","Per-draw descriptor bind (or batched by texture)","draw_rect for solid-color fills using a 1×1 white texture","Rect: { x, y, w, h: f32 } in screen pixel coordinates"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3
+[FILE] src/ui/image_renderer.zig
+
+Implement UI image rendering (shares UIVertex format with TextRenderer):
+1. ImageRenderer: { vbo: VkBuffer (host-visible mapped), count: u32, pipeline: VkPipeline }
+   Shares UIVertex: { pos:[2]f32, uv:[2]f32, color:[4]f32 }
+2. fn img_draw_rect(ir, x, y, w, h: f32, color: [4]f32, texture: *GpuTexture):
+   Emit 6 verts: 2 triangles for the quad
+   UV = full texture if no sub-rect specified
+3. fn img_draw_sub(ir, dst_rect, src_uv_rect: [4]f32, color, texture) — sprite sheet support
+4. Batching: collect quads per texture; flush sorted by texture to minimize descriptor binds
+5. fn img_flush(ir, cmd_buf, pipeline_layout):
+   For each texture batch: bind descriptor set; vkCmdDraw; advance VBO offset
+6. White 1×1 texture: create at init for solid color rects (UV always {0,0,1,1})
+7. Shares orthographic UBO with TextRenderer (same VkDescriptorSet or push constant)
+
+[DELIVERABLE] Crosshair PNG at screen center; health icon at top-left; draw_rect draws solid colored panel`},
+
+{id:"m8t2",name:"Buttons",tag:"ui",
+ desc:"ButtonWidget with hit-test, hover/press state machine, and click callbacks. Foundation for menus, settings, and pause screen.",
+ notes:["ButtonWidget: { rect, label, state, on_click } — NOT an ECS component, just a struct","State machine: normal→hover on mouse enter; hover→pressed on LMB down; invoke on LMB up","Render: background rect with per-state color + centered text label","UISystem iterates all registered ButtonWidgets per frame"],
+ prompt:`[ENGINE] Strife | Zig master
+[FILE] src/ui/button.zig + src/ui/ui_system.zig
+
+Implement button widget:
+1. Rect: { x, y, w, h: f32 }  ButtonState enum: .normal, .hover, .pressed
+2. ButtonWidget: { rect: Rect, label: []const u8, state: ButtonState, on_click: ?*const fn() void }
+3. fn rect_contains(r: Rect, p: [2]f32) bool — simple AABB test
+4. fn button_update(btn: *ButtonWidget, mouse_pos: [2]f32, lmb_down: bool, lmb_just_up: bool):
+   was_hover = rect_contains(rect, mouse_pos)
+   if !was_hover: btn.state = .normal; return
+   if lmb_down: btn.state = .pressed
+   else if lmb_just_up and btn.state == .pressed: if btn.on_click != null: btn.on_click.?(); btn.state = .hover
+   else: btn.state = .hover
+5. fn button_draw(btn, tr: *TextRenderer, ir: *ImageRenderer):
+   bg_color = switch btn.state { .normal→#222233, .hover→#3a3a55, .pressed→#5555aa }
+   img_draw_rect(ir, btn.rect, bg_color, white_tex)
+   text_draw(tr, font, btn.label, centered_in_rect(btn), scale, white)
+6. UISystem: { buttons: ArrayList(ButtonWidget) }; iterate + update + draw each frame
+
+[DELIVERABLE] "New Game" button highlights amber on hover; triggers callback on click; no ghost clicks`},
+
+{id:"m8t3",name:"Health Bars",tag:"ui",
+ desc:"World-space health bars projected to screen and drawn as 2D rect overlays. Show above enemy/NPC entities; hide when at full health.",
+ notes:["Project entity WorldMatrix translation to NDC → screen pixels","Bar = dark background rect + colored fill rect (width proportional to health %)","Color lerp: 100%=green, 50%=yellow, 0%=red","HealthBarSystem runs after CameraSystem (needs fresh view/proj matrices)"],
+ prompt:`[ENGINE] Strife | Zig master, Vulkan 1.3, Flecs
+[FILE] src/ui/health_bar.zig
+
+Implement world-space health bars:
+1. HealthBar component (ECS): { width_units: f32=2.0, height_px: f32=8.0, y_offset: f32=2.5, show_at_full: bool=false }
+2. HealthBarSystem (EcsPostUpdate):
+   For each entity with HealthBar + Health + WorldMatrix (and camera_ubo available):
+   a. world_pos = WorldMatrix.mat * Vec4{0, y_offset, 0, 1}
+   b. clip = cam_ubo.proj * cam_ubo.view * world_pos
+   c. if clip.w <= 0: skip (behind camera)
+   d. ndc = clip.xyz / clip.w
+   e. screen_x = (ndc.x * 0.5 + 0.5) * viewport_w - width_px*0.5
+      screen_y = (0.5 - ndc.y * 0.5) * viewport_h
+   f. pct = health.current / health.max
+   g. if pct >= 1.0 and !show_at_full: skip
+   h. img_draw_rect(ir, bg_rect, #3a0000, white_tex)
+      fill_color = lerp_color(red, green, pct)
+      img_draw_rect(ir, fill_rect(width * pct), fill_color, white_tex)
+
+[DELIVERABLE] Health bar floats above enemy; shrinks left as damage taken; disappears at full HP`}
+]},
+
+{n:9,name:"Gameplay Ready",icon:"⚔",tasks:[
+{id:"m9t0",name:"Health Component",tag:"gameplay",
+ desc:"Health component with damage/heal functions, regen, invincibility frames, and a DeathEvent. Foundation for all combat.",
+ notes:["Health: { current, max, regen_per_sec, invincible } — POD component","DamageEvent: custom Flecs event { amount, damage_type, source_entity }","DeathObserver: health.current <= 0 → emit DeathEvent → ecs_delete (deferred)","DamageType: .physical, .fire, .poison, .true_damage (bypasses armor)"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/gameplay/health.zig
+
+Implement health system:
+1. Health component: { current: f32, max: f32, regen_per_sec: f32=0, invincible: bool=false }
+2. DamageType enum: .physical, .fire, .poison, .true_damage
+3. DamageEvent (Flecs custom): { amount: f32, dtype: DamageType, source: c.ecs_entity_t }
+4. fn damage_entity(world, target, evt: DamageEvent):
+   h = get_component_mut(world, target, Health)
+   if h.invincible: return
+   h.current = @max(0, h.current - evt.amount)
+   ecs_emit(world, damage_event_id, target, &evt)
+5. fn heal_entity(world, target, amount: f32):
+   h.current = @min(h.max, h.current + amount)
+6. HealthSystem (EcsUpdate): for entities with regen_per_sec > 0: heal(regen * dt) if current < max
+7. DeathSystem (EcsOnSet, Health): if health.current <= 0 and was_alive:
+   ecs_emit(world, death_event_id, entity, null)
+   ecs_delete(world, entity) // deferred until end of frame
+8. Invincibility: fn set_invincible(world, entity, duration); InvincibilityTimer component
+
+[DELIVERABLE] Entity takes 30 damage → current decreases; reaches 0 → DeathEvent fires; entity deleted next frame`},
+
+{id:"m9t1",name:"Movement",tag:"gameplay",
+ desc:"Camera-relative WASD movement via Jolt CharacterController. Acceleration/friction for smooth start/stop. Sprint multiplier.",
+ notes:["Camera-relative: rotate input XZ by camera yaw — not world axes","Acceleration toward target velocity; friction when no input","Sprint: left-shift doubles speed (or hold joystick partially for analog)","FootstepSystem: play audio every 0.4s while grounded and moving"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs, Jolt
+[FILE] src/gameplay/movement.zig
+
+Implement character movement:
+1. Movement component: { speed: f32=5.0, sprint_mult: f32=2.0, accel: f32=20.0, friction: f32=12.0, velocity: Vec3 }
+2. MovementSystem (EcsUpdate): query entities with Movement + CharacterController + Camera (active):
+   a. WASD input → dir2d: Vec2 = {input.x, input.z} normalized (zero if no input)
+   b. Camera-relative: rotate dir2d by camera yaw → Vec3 world_dir
+   c. target_speed = if sprint: speed*sprint_mult else speed
+   d. target_vel = world_dir * target_speed  // XZ only
+   e. If has input:
+        vel.xz = lerp(vel.xz, target_vel.xz, accel * dt)
+      Else:
+        vel.xz = lerp(vel.xz, .{0,0}, friction * dt)
+   f. Preserve vel.y from CharacterController (gravity/jump handled in CharController)
+   g. jolt_char_set_velocity(cc, vel)
+3. fn movement_sprint_active(input) bool — left shift held
+4. FootstepSystem (EcsUpdate): timer += dt; if grounded and speed > 0.5 and timer > 0.4: play_footstep; timer=0
+
+[DELIVERABLE] WASD moves camera-relative; release → smooth decel; sprint feels 2× speed; footsteps at correct cadence`},
+
+{id:"m9t2",name:"Combat",tag:"gameplay",
+ desc:"Melee attack: hitbox sphere overlap from physics, damage application, knockback impulse. Attack cooldown and invincibility frames on hit.",
+ notes:["Melee hitbox: sphere overlap at pos + forward * range/2 with radius = range/2","Jolt: add jolt_overlap_sphere to wrapper — returns array of body_ids","On hit: damage_entity + apply_knockback + set_invincible(target, 0.5s)","Attack cooldown timer tracked in AttackComponent; animation event triggers hitbox active window"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs, Jolt
+[FILE] src/gameplay/combat.zig
+
+Implement basic melee combat:
+1. AttackDef: { damage: f32, range: f32, cooldown: f32, knockback: f32, layer_mask: u32 }
+2. Attacker component: { def: *AttackDef, cooldown_timer: f32, attacking: bool }
+3. Add to jolt_wrapper.cpp:
+   extern "C" uint32_t jolt_overlap_sphere(JoltCtx*, float cx,cy,cz, float radius, uint32_t* out_ids, uint32_t max_out);
+4. fn do_melee_attack(world, physics, attacker, transform, def):
+   origin = transform.pos + forward(transform) * def.range * 0.5
+   ids: [16]u32 = undefined
+   count = jolt_overlap_sphere(ctx, origin, def.range*0.5, &ids, 16)
+   For each id → entity (via body_to_entity map):
+     if entity == attacker: continue // skip self
+     damage_entity(world, entity, .{.amount=def.damage, .dtype=.physical, .source=attacker})
+     dir = normalize(entity.pos - attacker.pos)
+     jolt_apply_impulse(ctx, id, dir * def.knockback)
+     set_invincible(world, entity, 0.5)
+5. AttackSystem (EcsUpdate): timer -= dt; if attack_input and timer <= 0: do_melee_attack; timer = def.cooldown
+
+[DELIVERABLE] Punch enemy in range → takes damage + flies back; out-of-range = no hit; cooldown enforced`},
+
+{id:"m9t3",name:"Abilities",tag:"gameplay",
+ desc:"Data-driven ability system: abilities defined in JSON, bound to input slots, with cooldown/resource cost/cast time and typed effects. Foundation for all 7 Emender ability sets.",
+ notes:["AbilityEffect union: .deal_damage, .heal_self, .spawn_projectile, .apply_status, .area_damage","AbilitySlot: { def_id, cooldown_timer } — up to 6 slots per entity (Q/E/R/F/1/2)","Cast time: ability starts channel, effects fire after cast_time seconds","ResourceType: mana, stamina, charge — each Emender uses a different resource type"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/gameplay/ability_system.zig
+
+Implement ability system:
+1. AbilityEffectTag: .deal_damage, .heal_self, .spawn_prefab, .apply_status, .area_damage
+2. AbilityEffect: union(AbilityEffectTag) { deal_damage: f32, heal_self: f32, spawn_prefab: [64]u8, apply_status: struct{type: StatusType, duration: f32}, area_damage: struct{radius: f32, damage: f32} }
+3. AbilityDef: { id: u32, name: [64]u8, cooldown: f32, resource_cost: f32, resource_type: ResourceType, cast_time: f32, effects: []AbilityEffect }
+4. AbilitySlot: { def: ?*AbilityDef, cooldown_timer: f32, cast_timer: f32, casting: bool }
+5. AbilityComponent (ECS): { slots: [6]AbilitySlot }
+6. AbilitySystem (EcsUpdate):
+   For each slot: cooldown_timer -= dt
+   Check slot input (1-6): if pressed and timer <= 0 and has_resource:
+     if cast_time > 0: slot.casting=true; slot.cast_timer=0
+     else: execute_ability(world, entity, slot.def)
+   If casting: cast_timer += dt; if cast_timer >= def.cast_time: execute; casting=false
+7. fn execute_ability(world, caster, def): switch each effect and apply
+8. Load AbilityDefs from assets/abilities/*.json at startup
+
+[DELIVERABLE] Q key activates slot 0; applies effect after cast_time; cooldown countdown; resource depletes`},
+
+{id:"m9t4",name:"Inventory",tag:"gameplay",
+ desc:"Slot-based inventory with item stacking, use/equip, and the Strife relic system (3 permanent modifier slots). Pickups trigger via physics triggers.",
+ notes:["Inventory: 20 slots of ?ItemStack — displayed in UI grid","ItemDef: { name, icon, max_stack, on_use } — loaded from JSON at startup","RelicInventory: 3 slots for always-on stat modifiers","PickupSystem: TriggerEnter + PickupTag → inventory_add + destroy trigger entity"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs
+[FILE] src/gameplay/inventory.zig + src/gameplay/items.zig
+
+Implement inventory system:
+1. ItemId: u32; ItemStack: { id: ItemId, count: u32 }
+2. ItemDef: { id: ItemId, name: [64]u8, icon: AssetHandle, max_stack: u32, on_use: ?*const fn(*c.ecs_world_t, c.ecs_entity_t) void }
+3. ItemRegistry: ArrayList(ItemDef); fn item_get(id) ?*ItemDef
+4. Inventory component (ECS): { slots: [20]?ItemStack }
+   fn inv_add(inv, item_id, count) bool — find existing stack or empty slot; false if full
+   fn inv_remove(inv, item_id, count) bool
+   fn inv_use(inv, world, entity, slot_idx) — call item.on_use; remove 1 from stack
+5. RelicDef: { id: u32, name: [64]u8, desc: [256]u8, apply: *const fn(*c.ecs_world_t, c.ecs_entity_t) void }
+6. RelicInventory component (ECS): { relics: [3]?u32 }
+   fn relic_equip(world, entity, relic_id) bool — call relic.apply; store in slot
+7. PickupSystem: TriggerEnter observer; if trigger_ent has PickupTag: inv_add(item_id, 1); ecs_delete(trigger_ent)
+8. Load ItemDefs + RelicDefs from assets/items/*.json at startup
+
+[DELIVERABLE] Walk over health_potion pickup → inventory slot fills; use it → health+30; equip relic → modifier active`},
+
+{id:"m9t5",name:"AI",tag:"gameplay",
+ desc:"Enemy FSM: patrol waypoints → detect player → chase → attack → retreat. Raycast sight check. Steers via CharacterController velocity.",
+ notes:["States: .patrol, .chase, .attack, .retreat, .dead","Sight: raycast to player; blocked if hits StaticWorld layer; must be within sight_range + angle","Steering: normalized direction × speed applied to CharacterController","Knave bosses will use a BehaviorTree layered on this — FSM is the base layer"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs, Jolt
+[FILE] src/gameplay/ai.zig
+
+Implement enemy FSM AI:
+1. AIState enum: .patrol, .chase, .attack, .retreat, .dead
+2. AIAgent component: { state: AIState, target: c.ecs_entity_t=0, patrol_pts: [4]Vec3, patrol_idx: u32, sight_range: f32=15.0, attack_range: f32=2.0, speed: f32=3.5, sight_timer: f32 }
+3. AISystem (EcsUpdate):
+   .patrol: move_toward(patrol_pts[idx], speed); if dist < 0.5: idx=(idx+1)%4
+            sight_timer -= dt; if < 0: check_sight; sight_timer = 0.2
+   .chase:  move_toward(player_pos, speed); if dist < attack_range: .attack; if dist > sight_range*2: .patrol
+   .attack: face_target; attack cooldown check; do_melee_attack if cooldown==0; if target dead: .patrol
+4. fn check_sight(world, physics, agent_entity, player_entity) bool:
+   dir = player_pos - agent_pos; if length > sight_range: false
+   hit = raycast(physics, agent_pos, dir_norm, length)
+   return hit.entity == player_entity  // player not blocked
+5. fn move_toward(agent, target: Vec3, speed: f32): vel = normalize(target-pos)*speed; jolt_char_set_velocity
+
+[DELIVERABLE] Enemy patrols 4 points; spots player → chases; reaches attack range → attacks; player escapes → returns to patrol`},
+
+{id:"m9t6",name:"Projectiles",tag:"gameplay",
+ desc:"Projectile entities: spawn from abilities, travel in direction, raycast-detect hits, apply damage and spawn impact VFX on contact.",
+ notes:["Projectile: { velocity, damage, owner, lifetime, timer } — no physics body for fast projectiles","Per-frame raycast from current_pos to next_pos to detect hits (continuous collision)","On hit: damage_entity + prefab_instantiate(impact_vfx) + ecs_delete projectile","Homing variant: ProjectileTarget component → lerp velocity toward target"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs, Jolt
+[FILE] src/gameplay/projectile.zig
+
+Implement projectile system:
+1. Projectile component: { velocity: Vec3, damage: f32, owner: c.ecs_entity_t, lifetime: f32=3.0, timer: f32=0, on_hit: ?*const fn(*c.ecs_world_t, c.ecs_entity_t, RaycastHit)void }
+2. ProjectileSystem (EcsUpdate):
+   For each entity with Projectile + Transform:
+   a. timer += dt; if timer > lifetime: ecs_delete; continue
+   b. next_pos = pos + velocity * dt
+      hit = raycast(physics, pos, normalize(velocity), length(velocity)*dt)
+      if hit.hit and hit.entity != owner:
+        damage_entity(world, hit.entity, .{.amount=damage, .source=owner})
+        if on_hit: on_hit(world, entity, hit)
+        spawn_impact_vfx(world, hit.point)
+        ecs_delete(entity, deferred)
+      else: Transform.pos = next_pos
+3. fn spawn_projectile(world, prefab_name, owner, origin, dir, speed): prefab_instantiate + set Projectile
+4. HomingProjectile variant: { target: c.ecs_entity_t, turn_speed: f32 }
+   Each frame: desired_dir = normalize(target_pos - pos); rotate velocity toward desired_dir by turn_speed*dt
+
+[DELIVERABLE] Projectile spawns → travels → hits enemy → damage applied → impact VFX at hit point`},
+
+{id:"m9t7",name:"Save/Load",tag:"gameplay",
+ desc:"Player progress persistence: health, position, inventory, relics, quest flags. JSON saves to saves/slot_N.json. F5/F9 quicksave/quickload.",
+ notes:["Separate from scene JSON — scene = level layout; save = player progress","SaveData: { version, player_health, pos, rot, inventory, relic_ids, flags:[]u8 }","Multiple slots (0-7) + slot 255 autosave","Autosave on area transition; quicksave F5; quickload F9"],
+ prompt:`[ENGINE] Strife | Zig master, Flecs, std.json
+[FILE] src/gameplay/save_system.zig
+
+Implement game save/load:
+1. SavedItem: { item_id: u32, count: u32 }
+2. SaveData: {
+     version: u32 = 1,
+     player_health: f32, player_max_health: f32,
+     pos: [3]f32, rot: [4]f32,
+     inventory: []SavedItem,
+     relic_ids: []u32,
+     flags: []u8  // bitfield: quests, discoveries, boss kills
+   }
+3. fn game_save(world, player_entity, slot: u8) !void:
+   Read Health, Transform, Inventory, RelicInventory from player_entity
+   Serialize SaveData to std.json; create "saves/" dir; write "saves/slot_{slot}.json"
+4. fn game_load(world, asset_manager, slot: u8) !void:
+   Read + parse JSON; set all player components; re-apply relic modifiers
+5. fn save_exists(slot: u8) bool — file_exists("saves/slot_{slot}.json")
+6. fn save_delete(slot: u8) — std.fs.cwd().deleteFile
+7. InputSystem: if F5 just_pressed: game_save(slot 0); if F9: game_load(slot 0)
+8. fn autosave(world, player) — game_save(slot 255)
+
+[DELIVERABLE] F5 saves; take 50 damage; F9 restores health + position; inventory and relics restored exactly`}
+]},
+
+{n:10,name:"STOP ENGINE",icon:"⛔",stop:true,tasks:[]}
+];
+
+// ── State ────────────────────────────────────────────────────────
+const expandedTasks = new Set();
+const openMs = new Set([0,1]);
+
+function getKey(id){ return 'strife_'+id; }
+
+// Seed state reflecting actual repo progress as of 2026-06-26 (see CLAUDE.md
+// roadmap section for the per-item notes on what's done vs partial vs not
+// started). Only used when localStorage has no explicit value yet for an id,
+// so it never clobbers anything you've manually toggled in this browser.
+const DEFAULT_DONE = new Set([
+  'm0t0','m0t1','m0t2','m0t3','m0t4','m0t5','m0t6','m0t7','m0t8','m0t9','m0t10','m0t11',
+  'm1t0','m1t1','m1t2','m1t3','m1t4','m1t5','m1t6','m1t7',
+  'm2t0','m2t1','m2t2','m2t3','m2t4','m2t6',
+  'm3t2','m3t5','m3t6','m3t7'
+]);
+const DEFAULT_PARTIAL = new Set([
+  'm3t0','m3t1','m3t3','m3t4'
+]);
+
+function isDone(id){
+  const v=localStorage.getItem(getKey(id));
+  if(v===null) return DEFAULT_DONE.has(id);
+  return v==='1';
+}
+function setDone(id,v){ localStorage.setItem(getKey(id),v?'1':'0'); }
+function isPartial(id){
+  if(isDone(id)) return false;
+  if(localStorage.getItem(getKey(id))!==null) return false; // user has explicitly set this; don't second-guess it
+  return DEFAULT_PARTIAL.has(id);
+}
+
+function mPct(m){
+  if(!m.tasks.length) return {done:0,total:0,pct:0};
+  const done=m.tasks.filter(t=>isDone(t.id)).length;
+  const weighted=done+m.tasks.filter(t=>isPartial(t.id)).length*0.5;
+  return {done,total:m.tasks.length,pct:Math.round(weighted/m.tasks.length*100)||0};
+}
+function totalPct(){
+  let tot=0,done=0,weighted=0;
+  D.forEach(m=>m.tasks.forEach(t=>{tot++;if(isDone(t.id)){done++;weighted++;}else if(isPartial(t.id)){weighted+=0.5;}}));
+  return {done,total:tot,pct:Math.round(weighted/tot*100)||0};
+}
+
+// ── Build DOM ────────────────────────────────────────────────────
+function buildCells(){
+  const el=document.getElementById('cells');
+  el.innerHTML=D.filter(m=>!m.stop).map((m,i)=>{
+    const {pct}=mPct(m);
+    return `<div class="cell">
+      <div class="cell-bar"><div class="cell-fill${pct===100?' complete':''}" id="cf${i}" style="width:${pct}%"></div></div>
+      <span class="cell-label${pct===100?' complete':''}" id="cl${i}">M${i}&nbsp;${m.name.substring(0,7)}</span>
+    </div>`;
+  }).join('');
+}
+
+function tagClass(tag){ return 'tg-'+tag; }
+
+function buildTasks(m){
+  return m.tasks.map(t=>{
+    const done=isDone(t.id);
+    const partial=isPartial(t.id);
+    const open=expandedTasks.has(t.id);
+    return `<div class="task" id="task_${t.id}">
+      <div class="task-main">
+        <input type="checkbox" class="task-cb${partial?' partial':''}" id="cb_${t.id}" ${done?'checked':''} title="${partial?'Partially implemented — see CLAUDE.md for details':''}">
+        <label class="task-name${partial?' partial':''}" for="cb_${t.id}">${t.name}</label>
+        <span class="tag ${tagClass(t.tag)}">${t.tag}</span>
+        <button class="exp-btn${open?' open':''}" id="eb_${t.id}" onclick="toggleTask('${t.id}')">${open?'▾ DETAILS':'▸ DETAILS'}</button>
+      </div>
+      <div class="task-detail${open?' show':''}" id="td_${t.id}">
+        <p class="det-desc">${t.desc}</p>
+        <ul class="det-notes">${t.notes.map(n=>`<li>${n}</li>`).join('')}</ul>
+        <div class="prompt-hdr">
+          <span class="prompt-lbl">⬡ Devin Prompt</span>
+          <button class="copy-btn" id="cpbtn_${t.id}" onclick="copyPrompt('${t.id}')">COPY</button>
+        </div>
+        <pre class="prompt-box" id="pb_${t.id}">${t.prompt}</pre>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function buildContent(){
+  const root=document.getElementById('root');
+  root.innerHTML=D.map((m,mi)=>{
+    const {done,total,pct}=mPct(m);
+    const open=openMs.has(mi);
+    if(m.stop) return `
+      <div class="ms stop" id="ms_${mi}">
+        <div class="ms-hdr" onclick="toggleMs(${mi})">
+          <span class="ms-icon">${m.icon}</span>
+          <span class="ms-num">M${mi}</span>
+          <span class="ms-name">${m.name}</span>
+          <span class="chv${open?' open':''}" id="chv_${mi}">▶</span>
+        </div>
+        <div id="msb_${mi}" style="display:${open?'block':'none'}">
+          <div class="stop-body">
+            <div class="stop-title">🎮 Start Building Strife Gameplay</div>
+            <div class="stop-sub">Engine work is complete. No more renderer features, no more system architecture. Ship Strife.</div>
+          </div>
+        </div>
+      </div>`;
+    return `
+      <div class="ms" id="ms_${mi}">
+        <div class="ms-hdr" onclick="toggleMs(${mi})">
+          <span class="ms-icon">${m.icon}</span>
+          <span class="ms-num">M${mi}</span>
+          <span class="ms-name">${m.name}</span>
+          <span class="ms-ptext" id="mpt_${mi}">${done}/${total}</span>
+          <div class="ms-mbar"><div class="ms-mfill" id="mmf_${mi}" style="width:${pct}%"></div></div>
+          <span class="chv${open?' open':''}" id="chv_${mi}">▶</span>
+        </div>
+        <div class="ms-body" id="msb_${mi}" style="display:${open?'block':'none'}">
+          ${buildTasks(m)}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Attach checkbox listeners
+  D.forEach(m=>m.tasks.forEach(t=>{
+    const cb=document.getElementById('cb_'+t.id);
+    if(cb) cb.addEventListener('change',()=>{
+      setDone(t.id,cb.checked);
+      // Once explicitly toggled, this id is no longer "partial" — drop the
+      // amber styling immediately rather than waiting for a full re-render.
+      cb.classList.remove('partial');
+      cb.title='';
+      const lbl=document.querySelector('label[for="cb_'+t.id+'"]');
+      if(lbl) lbl.classList.remove('partial');
+      updateProgress();
+    });
+  }));
+}
+
+// ── Update progress (no re-render) ──────────────────────────────
+function updateProgress(){
+  const {done,total,pct}=totalPct();
+  document.getElementById('ob-fill').style.width=pct+'%';
+  document.getElementById('ob-pct').textContent=pct+'%';
+  document.getElementById('ob-counts').textContent=done+' / '+total;
+  D.forEach((m,mi)=>{
+    if(m.stop) return;
+    const {done:md,total:mt,pct:mp}=mPct(m);
+    const mmf=document.getElementById('mmf_'+mi);
+    const mpt=document.getElementById('mpt_'+mi);
+    const cf=document.getElementById('cf'+mi);
+    const cl=document.getElementById('cl'+mi);
+    if(mmf) mmf.style.width=mp+'%';
+    if(mpt) mpt.textContent=md+'/'+mt;
+    if(cf){ cf.style.width=mp+'%'; cf.className='cell-fill'+(mp===100?' complete':''); }
+    if(cl){ cl.className='cell-label'+(mp===100?' complete':''); }
+  });
+}
+
+// ── Interactions ─────────────────────────────────────────────────
+function toggleMs(mi){
+  const body=document.getElementById('msb_'+mi);
+  const chv=document.getElementById('chv_'+mi);
+  if(!body) return;
+  const open=body.style.display==='block';
+  body.style.display=open?'none':'block';
+  if(chv) chv.className='chv'+(open?'':' open');
+  if(open) openMs.delete(mi); else openMs.add(mi);
+}
+
+function toggleTask(taskId){
+  const det=document.getElementById('td_'+taskId);
+  const btn=document.getElementById('eb_'+taskId);
+  if(!det) return;
+  const open=det.classList.toggle('show');
+  if(btn){ btn.classList.toggle('open',open); btn.textContent=open?'▾ DETAILS':'▸ DETAILS'; }
+  if(open) expandedTasks.add(taskId); else expandedTasks.delete(taskId);
+}
+
+function copyPrompt(taskId){
+  const pb=document.getElementById('pb_'+taskId);
+  const btn=document.getElementById('cpbtn_'+taskId);
+  if(!pb||!btn) return;
+  navigator.clipboard.writeText(pb.textContent).then(()=>{
+    btn.textContent='✓ COPIED'; btn.classList.add('ok');
+    setTimeout(()=>{ btn.textContent='COPY'; btn.classList.remove('ok'); },2000);
+  }).catch(()=>{
+    // fallback
+    const sel=window.getSelection(), range=document.createRange();
+    range.selectNodeContents(pb); sel.removeAllRanges(); sel.addRange(range);
+    document.execCommand('copy');
+    sel.removeAllRanges();
+    btn.textContent='✓ COPIED'; btn.classList.add('ok');
+    setTimeout(()=>{ btn.textContent='COPY'; btn.classList.remove('ok'); },2000);
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+buildCells();
+buildContent();
+updateProgress();
+</script>
+</body>
+</html>

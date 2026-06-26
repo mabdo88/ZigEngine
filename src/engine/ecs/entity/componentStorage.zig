@@ -1,5 +1,6 @@
 const std = @import("std");
 const e = @import("entity.zig").Entity;
+const strife_assert = @import("../../assert.zig").strife_assert;
 
 pub fn ComponentStorage(comptime T: type) type {
     return struct {
@@ -30,6 +31,7 @@ pub fn ComponentStorage(comptime T: type) type {
             errdefer self.dense.shrinkRetainingCapacity(self.dense.items.len - 1);
             try self.entities.append(allocator, entity.index);
             self.sparse.items[entity.index] = dense_index;
+            strife_assert(self.dense.items.len == self.entities.items.len, "dense/entities length mismatch after attach", @src());
         }
         pub fn remove(self: *Self, entity: e) !void {
             if (entity.index >= self.sparse.items.len) return;
@@ -44,6 +46,7 @@ pub fn ComponentStorage(comptime T: type) type {
             self.sparse.items[entity.index] = EMPTY;
             _ = self.dense.pop();
             _ = self.entities.pop();
+            strife_assert(self.dense.items.len == self.entities.items.len, "dense/entities length mismatch after remove", @src());
         }
         pub fn getByIndex(self: *Self, entity_id: u32) ?*T {
             if (entity_id >= self.sparse.items.len) return null;

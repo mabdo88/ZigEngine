@@ -1,11 +1,10 @@
 const std = @import("std");
 const gltf = @import("cgltf.zig");
-const stbi = @cImport({
-    @cInclude("../../deps/stb/stb_image.h");
-});
+const stbi = @import("stbimport");
 
 const components = @import("../engine/ecs/components/components.zig");
 const math = @import("../engine/math.zig");
+const log = @import("../engine/log.zig");
 
 pub const MeshData = struct {
     vertices: []components.Vertex,
@@ -59,6 +58,8 @@ pub const MaterialData = struct {
     pixels: []u8,
     width: u32,
     height: u32,
+    metallic: f32 = 0.0,
+    roughness: f32 = 0.5,
 };
 
 pub const ScenePrimitive = struct {
@@ -130,7 +131,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
                 }
             }
             if (pos_acc == null or nrm_acc == null or uv_acc == null or prim.indices == null) {
-                std.log.warn("loadgltf: mesh[{d}] prim[{d}] missing attributes, skipping", .{ mi, pi });
+                log.warn(@src(), "loadgltf: mesh[{d}] prim[{d}] missing attributes, skipping", .{ mi, pi });
                 continue;
             }
 
@@ -183,6 +184,12 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
             var pixels: []u8 = undefined;
             var tw: u32 = 1;
             var th: u32 = 1;
+            var metallic: f32 = 0.0;
+            var roughness: f32 = 0.5;
+            if (prim.material != null and prim.material.*.has_pbr_metallic_roughness != 0) {
+                metallic = prim.material.*.pbr_metallic_roughness.metallic_factor;
+                roughness = prim.material.*.pbr_metallic_roughness.roughness_factor;
+            }
 
             if (prim.material != null and
                 prim.material.*.has_pbr_metallic_roughness != 0 and
@@ -206,7 +213,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
                     @memcpy(pixels, decoded[0 .. tw * th * 4]);
                     stbi.stbi_image_free(decoded);
                 } else {
-                    std.log.warn("loadgltf: stbi failed to load '{s}', using white fallback", .{img_path});
+                    log.warn(@src(), "loadgltf: stbi failed to load '{s}', using white fallback", .{img_path});
                     pixels = try allocator.alloc(u8, 4);
                     pixels[0] = 255;
                     pixels[1] = 255;
@@ -222,7 +229,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
             }
 
             const mat_idx: u32 = @intCast(mat_list.items.len);
-            try mat_list.append(allocator, .{ .pixels = pixels, .width = tw, .height = th });
+            try mat_list.append(allocator, .{ .pixels = pixels, .width = tw, .height = th, .metallic = metallic, .roughness = roughness });
             try mat_map.put(mat_key, mat_idx);
         }
     }
@@ -261,7 +268,7 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
         }
     }
 
-    std.log.info("loadgltf: {d} mesh(es), {d} material(s), {d} primitive(s)", .{
+    log.info(@src(), "loadgltf: {d} mesh(es), {d} material(s), {d} primitive(s)", .{
         mesh_list.items.len, mat_list.items.len, prim_list.items.len,
     });
 

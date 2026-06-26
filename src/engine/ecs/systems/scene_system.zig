@@ -3,6 +3,7 @@ const Registry = @import("../entity/registry.zig").Registry;
 const Entity = @import("../entity/entity.zig").Entity;
 const components = @import("../components/components.zig");
 const meshLoader = @import("../../../resources/meshLoader.zig");
+const objLoader = @import("../../../resources/objLoader.zig");
 const window = @import("../../../platform/window.zig");
 const SystemCreateCtx = @import("system.zig").SystemCreateCtx;
 const renderer = @import("../../../renderer/zvulkanSystem.zig");
@@ -11,17 +12,18 @@ const config_mod = @import("../../config.zig");
 const MeshCache = @import("../../../resources/meshCache.zig").MeshCache;
 const math = @import("../../math.zig");
 const shared_state = @import("shared_state.zig");
+const log = @import("../../log.zig");
 
 pub const PreloadedScene = struct {
     primitives: []meshLoader.ScenePrimitive,
     mesh_ids: []u32,
-    texture_indices: []u32,
+    material_indices: []u32,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *PreloadedScene) void {
         self.allocator.free(self.primitives);
         self.allocator.free(self.mesh_ids);
-        self.allocator.free(self.texture_indices);
+        self.allocator.free(self.material_indices);
     }
 };
 
@@ -45,9 +47,20 @@ const BgLoadArgs = struct {
     preload_state: *ScenePreloadState,
 };
 
+/// Dispatches by extension: .obj goes through the OBJ parser wrapped as a
+/// one-mesh GltfScene, everything else goes through cgltf.
+fn loadSceneFile(allocator: std.mem.Allocator, path: [:0]const u8) !meshLoader.GltfScene {
+    if (std.ascii.eqlIgnoreCase(std.fs.path.extension(path), ".obj")) {
+        var threaded = std.Io.Threaded.init(allocator, .{});
+        defer threaded.deinit();
+        return objLoader.loadObjScene(threaded.io(), allocator, path);
+    }
+    return meshLoader.loadgltf(allocator, path);
+}
+
 fn bgLoadThread(args: *BgLoadArgs) void {
-    var gltf = meshLoader.loadgltf(args.allocator, args.path) catch {
-        std.log.err("bgLoad: failed to load '{s}'", .{args.path});
+    var gltf = loadSceneFile(args.allocator, args.path) catch {
+        log.err(@src(), "bgLoad: failed to load '{s}'", .{args.path});
         args.preload_state.bg_loaded.store(true, .release);
         return;
     };
@@ -97,14 +110,15 @@ pub const SceneSystemState = struct {
                 const gpu = render_system.getGpuSystem();
                 const allocator = self.allocator;
 
-                const texture_indices = try allocator.alloc(u32, gltf.materials.len);
-                errdefer allocator.free(texture_indices);
+                const material_indices = try allocator.alloc(u32, gltf.materials.len);
+                errdefer allocator.free(material_indices);
 
                 var batch = try renderer.beginUploadBatch(allocator);
                 errdefer batch.cancel();
 
                 for (gltf.materials, 0..) |mat, mi| {
-                    texture_indices[mi] = try renderer.uploadTextureBatched(&batch, mat.pixels, mat.width, mat.height);
+                    const texture_index = try renderer.uploadTextureBatched(&batch, mat.pixels, mat.width, mat.height);
+                    material_indices[mi] = try renderer.registerMaterial(mat.metallic, mat.roughness, texture_index);
                 }
 
                 for (ps.mesh_ids) |mesh_id| {
@@ -120,7 +134,7 @@ pub const SceneSystemState = struct {
                 self.preloaded[i] = .{
                     .primitives = primitives,
                     .mesh_ids = ps.mesh_ids,
-                    .texture_indices = texture_indices,
+                    .material_indices = material_indices,
                     .allocator = allocator,
                 };
 
@@ -133,7 +147,7 @@ pub const SceneSystemState = struct {
                 t.join();
                 self.bg_thread = null;
             }
-            std.log.info("scene_system: background preload complete for scene {d}", .{i});
+            log.info(@src(), "scene_system: background preload complete for scene {d}", .{i});
         }
     }
 
@@ -155,7 +169,7 @@ pub const SceneSystemState = struct {
         registry.remove(components.ScenePendingTag, pending);
         try registry.set(pending, components.SceneLoadingTag{});
 
-        std.log.info("scene_system: activating '{s}'", .{scene.name});
+        log.info(@src(), "scene_system: activating '{s}'", .{scene.name});
     }
 
     fn processLoading(self: *SceneSystemState, registry: *Registry) !void {
@@ -171,7 +185,7 @@ pub const SceneSystemState = struct {
         try registry.set(pl.scene_entity, components.SceneActiveTag{});
 
         const switch_end = window.getTime();
-        std.log.info("scene_system: scene '{s}' ready in {d}ms", .{ pl.scene.name, @as(i64, @intFromFloat((switch_end - switch_start) * 1000)) });
+        log.info(@src(), "scene_system: scene '{s}' ready in {d}ms", .{ pl.scene.name, @as(i64, @intFromFloat((switch_end - switch_start) * 1000)) });
     }
 
     fn unloadActiveScene(self: *SceneSystemState, registry: *Registry) !void {
@@ -206,15 +220,15 @@ pub const SceneSystemState = struct {
             const mesh_id = preloaded.mesh_ids[prim.mesh_idx];
             try registry.add(entity, components.MeshComponent{ .mesh_id = mesh_id });
 
-            try registry.add(entity, components.WorldTransformComponent{ .matrix = prim.transform });
+            try registry.add(entity, components.BakedTransformComponent{ .matrix = prim.transform });
             try registry.add(entity, components.TransformComponent{
                 .position = scene.offset,
                 .rotation = .{ 0.0, 0.0, 0.0 },
                 .scale = .{ 1.0, 1.0, 1.0 },
             });
 
-            const texture_index = preloaded.texture_indices[prim.material_idx];
-            try registry.add(entity, components.TextureComponent{ .textureIndex = texture_index });
+            const material_index = preloaded.material_indices[prim.material_idx];
+            try registry.add(entity, components.MaterialComponent{ .material_index = material_index });
 
             try registry.add(entity, components.SceneOwnedComponent{ .owner = scene_entity });
         }
@@ -230,7 +244,7 @@ pub const SceneSystemState = struct {
             shared_state.fly_cam.pitch = std.math.asin(std.math.clamp(dir[1], -1.0, 1.0));
         }
 
-        std.log.info("scene_system: spawned '{s}' ({d} primitives)", .{ scene.name, preloaded.primitives.len });
+        log.info(@src(), "scene_system: spawned '{s}' ({d} primitives)", .{ scene.name, preloaded.primitives.len });
     }
 };
 
@@ -250,14 +264,16 @@ pub fn create(ctx: *SystemCreateCtx) anyerror!*anyopaque {
     const n = config.scenes.len;
     state.preloaded = try allocator.alloc(PreloadedScene, n);
     for (state.preloaded) |*ps| {
-        ps.* = .{ .primitives = &.{}, .mesh_ids = &.{}, .texture_indices = &.{}, .allocator = allocator };
+        ps.* = .{ .primitives = &.{}, .mesh_ids = &.{}, .material_indices = &.{}, .allocator = allocator };
     }
     state.preload_states = try allocator.alloc(ScenePreloadState, n);
     for (state.preload_states) |*ps| {
         ps.* = .{};
     }
 
-    try preloadSceneSync(state, allocator, registry, &config.scenes[0], 0);
+    if (n > 0) {
+        try preloadSceneSync(state, allocator, registry, &config.scenes[0], 0);
+    }
 
     try spawnScenes(registry, config.scenes);
     try spawnCamera(registry, config.camera);
@@ -268,7 +284,7 @@ pub fn create(ctx: *SystemCreateCtx) anyerror!*anyopaque {
     }
 
     if (n > 1) {
-        const path_dup = try allocator.dupeZ(u8, config.scenes[1].path);
+        const path_dup = try allocator.dupeSentinel(u8, config.scenes[1].path, 0);
         state.bg_path = path_dup;
         state.bg_args = .{
             .allocator = allocator,
@@ -321,7 +337,7 @@ pub fn destroy(allocator: std.mem.Allocator, _: *Registry, ctx: *anyopaque) void
 fn preloadSceneSync(state: *SceneSystemState, allocator: std.mem.Allocator, registry: *Registry, sc: *const config_mod.Config.SceneConfig, index: usize) !void {
     const scene_start = window.getTime();
 
-    var gltf = try meshLoader.loadgltf(allocator, sc.path);
+    var gltf = try loadSceneFile(allocator, sc.path);
     defer gltf.deinit();
 
     const mesh_ids = try allocator.alloc(u32, gltf.meshes.len);
@@ -330,14 +346,15 @@ fn preloadSceneSync(state: *SceneSystemState, allocator: std.mem.Allocator, regi
         mesh_ids[mi] = try registry.mesh_cache.register(mesh.vertices, mesh.indices);
     }
 
-    const texture_indices = try allocator.alloc(u32, gltf.materials.len);
-    errdefer allocator.free(texture_indices);
+    const material_indices = try allocator.alloc(u32, gltf.materials.len);
+    errdefer allocator.free(material_indices);
 
     var batch = try renderer.beginUploadBatch(allocator);
     errdefer batch.cancel();
 
     for (gltf.materials, 0..) |mat, mi| {
-        texture_indices[mi] = try renderer.uploadTextureBatched(&batch, mat.pixels, mat.width, mat.height);
+        const texture_index = try renderer.uploadTextureBatched(&batch, mat.pixels, mat.width, mat.height);
+        material_indices[mi] = try renderer.registerMaterial(mat.metallic, mat.roughness, texture_index);
     }
 
     const gpu = render_system.getGpuSystem();
@@ -356,14 +373,14 @@ fn preloadSceneSync(state: *SceneSystemState, allocator: std.mem.Allocator, regi
     state.preloaded[index] = .{
         .primitives = primitives,
         .mesh_ids = mesh_ids,
-        .texture_indices = texture_indices,
+        .material_indices = material_indices,
         .allocator = allocator,
     };
     state.preload_states[index].gpu_uploaded = true;
 
     const scene_end = window.getTime();
-    std.log.info("preload: '{s}' CPU+GPU {d}ms, GPU submit {d}ms ({d} meshes, {d} textures, {d} primitives)", .{
-        sc.name, @as(i64, @intFromFloat((scene_end - scene_start) * 1000)), @as(i64, @intFromFloat((gpu_end - gpu_start) * 1000)), mesh_ids.len, texture_indices.len, primitives.len,
+    log.info(@src(), "preload: '{s}' CPU+GPU {d}ms, GPU submit {d}ms ({d} meshes, {d} materials, {d} primitives)", .{
+        sc.name, @as(i64, @intFromFloat((scene_end - scene_start) * 1000)), @as(i64, @intFromFloat((gpu_end - gpu_start) * 1000)), mesh_ids.len, material_indices.len, primitives.len,
     });
 }
 

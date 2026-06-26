@@ -7,6 +7,7 @@ const upload = @import("upload.zig");
 const math = @import("../engine/math.zig");
 const event = @import("../engine/ecs/event.zig");
 const meshCache = @import("../resources/meshCache.zig");
+const log = @import("../engine/log.zig");
 
 fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
@@ -155,15 +156,11 @@ pub const RenderSystem = struct {
                     const mesh_data = registry.mesh_cache.get(mesh_id) orelse continue;
                     const gpu_mesh = try uploadMesh(self.ctx, self.allocator, mesh_data);
                     try self.attachMesh(entity, mesh_id, gpu_mesh);
-                    std.log.info("RenderSystem: uploaded mesh_id {d} for entity {}", .{ mesh_id, entity.index });
+                    log.info(@src(), "RenderSystem: uploaded mesh_id {d} for entity {}", .{ mesh_id, entity.index });
                 }
             }
 
-            const model_matrix = blk: {
-                const world = if (registry.get(components.WorldTransformComponent, entity)) |wt| wt.matrix else math.identityMatrix();
-                const local = if (registry.get(components.TransformComponent, entity)) |transform| math.transformToMatrix(transform) else math.identityMatrix();
-                break :blk math.matMul(world, local);
-            };
+            const model_matrix = if (registry.get(components.FinalTransformComponent, entity)) |ft| ft.matrix else math.identityMatrix();
 
             const gpu_mesh = self.gpu_meshes.get(mesh_id).?;
             const offset: zvkw.zvk.VkDeviceSize = 0;
@@ -171,10 +168,28 @@ pub const RenderSystem = struct {
             zvkw.zvk.vkCmdBindIndexBuffer(cb, gpu_mesh.indexBuffer, 0, zvkw.zvk.VK_INDEX_TYPE_UINT32);
             const pc = zvkw.PushConstants{
                 .model = model_matrix,
-                .textureIndex = if (registry.get(components.TextureComponent, entity)) |tc| tc.textureIndex else 0,
+                .materialIndex = if (registry.get(components.MaterialComponent, entity)) |mc| mc.material_index else 0,
             };
 
             zvkw.zvk.vkCmdPushConstants(cb, self.ctx.pipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT, 0, @sizeOf(zvkw.PushConstants), @ptrCast(&pc));
+            zvkw.zvk.vkCmdDrawIndexed(cb, gpu_mesh.indexCount, 1, 0, 0, 0);
+        }
+    }
+
+    pub fn updateShadow(self: *RenderSystem, registry: *Registry, cb: zvkw.zvk.VkCommandBuffer, light_view_proj: [4][4]f32) !void {
+        var it = registry.Query(.{components.MeshComponent});
+        while (it.next()) |entity| {
+            const mesh = registry.get(components.MeshComponent, entity).?;
+            if (!mesh.isValid()) continue;
+            const gpu_mesh = self.gpu_meshes.get(mesh.mesh_id) orelse continue;
+
+            const model_matrix = if (registry.get(components.FinalTransformComponent, entity)) |ft| ft.matrix else math.identityMatrix();
+
+            const offset: zvkw.zvk.VkDeviceSize = 0;
+            zvkw.zvk.vkCmdBindVertexBuffers(cb, 0, 1, &gpu_mesh.vertexBuffer, &offset);
+            zvkw.zvk.vkCmdBindIndexBuffer(cb, gpu_mesh.indexBuffer, 0, zvkw.zvk.VK_INDEX_TYPE_UINT32);
+            const pc = zvkw.ShadowPushConstants{ .mvp = math.matMul(light_view_proj, model_matrix) };
+            zvkw.zvk.vkCmdPushConstants(cb, self.ctx.shadowPipelineLayout, zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(zvkw.ShadowPushConstants), @ptrCast(&pc));
             zvkw.zvk.vkCmdDrawIndexed(cb, gpu_mesh.indexCount, 1, 0, 0, 0);
         }
     }

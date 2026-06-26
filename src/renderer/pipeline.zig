@@ -1,12 +1,28 @@
 const std = @import("std");
+const Io = std.Io;
 const zvkw = @import("zVulkanContext.zig");
 
 fn check(result: zvkw.zvk.VkResult) !void {
     if (result != zvkw.zvk.VK_SUCCESS) return error.VulkanCallFailed;
 }
 
+/// Read at runtime (not @embedFile) so shader hot-reload (see hotreload.zig
+/// / zvulkanSystem.zig) can recreate the pipeline from a freshly-recompiled
+/// .spv without rebuilding the exe. Reads with real 4-byte alignment via
+/// readFileAllocOptions — fs.zig's plain readFileAlloc allocates at
+/// alignment 1, and @alignCast-ing that result doesn't change the
+/// allocation's actual alignment, only the pointer's static type, which
+/// trips the allocator's alignment-mismatch safety check on free().
+pub fn loadSpvAligned(allocator: std.mem.Allocator, path: []const u8) ![]align(4) const u8 {
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    return Io.Dir.cwd().readFileAllocOptions(io, path, allocator, .unlimited, .@"4", null);
+}
+
 pub fn createPipeline(ctx: *zvkw.VulkanContext) !void {
-    const spv = @embedFile("../shaders/slang.spv");
+    const spv = try loadSpvAligned(ctx.zallocator, "src/shaders/slang.spv");
+    defer ctx.zallocator.free(spv);
 
     const shaderModuleCI = zvkw.zvk.VkShaderModuleCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -99,19 +115,23 @@ pub fn createPipeline(ctx: *zvkw.VulkanContext) !void {
         .offset = 0,
         .size = @sizeOf(zvkw.PushConstants),
     };
-    const setLayouts = [2]zvkw.zvk.VkDescriptorSetLayout{
-        ctx.uboDescriptorSetLayout,
-        ctx.bindlessDescriptorSetLayout,
-    };
-    const pipelineLayoutCI = zvkw.zvk.VkPipelineLayoutCreateInfo{
-        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 2,
-        .pSetLayouts = &setLayouts,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pushConstantRange,
-    };
-    var result2 = zvkw.zvk.vkCreatePipelineLayout(ctx.m_Device, &pipelineLayoutCI, null, &ctx.pipelineLayout);
-    if (result2 != zvkw.zvk.VK_SUCCESS) return error.CreatePipelineLayoutFailed;
+    // Only build the layout once — reload (calling createPipeline again with
+    // fresh shader bytes) must reuse the existing layout, not leak a new one.
+    if (ctx.pipelineLayout == null) {
+        const setLayouts = [2]zvkw.zvk.VkDescriptorSetLayout{
+            ctx.uboDescriptorSetLayout,
+            ctx.bindlessDescriptorSetLayout,
+        };
+        const pipelineLayoutCI = zvkw.zvk.VkPipelineLayoutCreateInfo{
+            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .setLayoutCount = 2,
+            .pSetLayouts = &setLayouts,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &pushConstantRange,
+        };
+        const layoutResult = zvkw.zvk.vkCreatePipelineLayout(ctx.m_Device, &pipelineLayoutCI, null, &ctx.pipelineLayout);
+        if (layoutResult != zvkw.zvk.VK_SUCCESS) return error.CreatePipelineLayoutFailed;
+    }
 
     const pipelineRenderingCI = zvkw.zvk.VkPipelineRenderingCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
@@ -134,69 +154,129 @@ pub fn createPipeline(ctx: *zvkw.VulkanContext) !void {
         .pDynamicState = &dynamicStateCI,
         .layout = ctx.pipelineLayout,
     };
-    result2 = zvkw.zvk.vkCreateGraphicsPipelines(ctx.m_Device, null, 1, &pipelineCI, null, &ctx.pipeline);
-    if (result2 != zvkw.zvk.VK_SUCCESS) return error.CreatePipelineFailed;
+    const pipelineResult = zvkw.zvk.vkCreateGraphicsPipelines(ctx.m_Device, null, 1, &pipelineCI, null, &ctx.pipeline);
+    if (pipelineResult != zvkw.zvk.VK_SUCCESS) return error.CreatePipelineFailed;
 }
 
 pub fn createDescriptorSetLayout(ctx: *zvkw.VulkanContext) !void {
-    const uboBinding = zvkw.zvk.VkDescriptorSetLayoutBinding{
-        .binding = 0,
-        .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = 1,
-        .stageFlags = zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT,
+    const uboBindings = [2]zvkw.zvk.VkDescriptorSetLayoutBinding{
+        .{
+            .binding = 0,
+            .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT | zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
+        .{
+            .binding = 1,
+            .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
     };
     const uboLayoutCI = zvkw.zvk.VkDescriptorSetLayoutCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindings = &uboBinding,
+        .bindingCount = 2,
+        .pBindings = &uboBindings,
     };
     var result = zvkw.zvk.vkCreateDescriptorSetLayout(ctx.m_Device, &uboLayoutCI, null, &ctx.uboDescriptorSetLayout);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorSetLayoutFailed;
 
-    const textureBinding = zvkw.zvk.VkDescriptorSetLayoutBinding{
-        .binding = 0,
-        .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = zvkw.MAX_TEXTURES,
-        .stageFlags = zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
+    const bindlessBindings = [2]zvkw.zvk.VkDescriptorSetLayoutBinding{
+        .{
+            .binding = 0,
+            .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = zvkw.MAX_TEXTURES,
+            .stageFlags = zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
+        .{
+            .binding = 1,
+            .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = zvkw.zvk.VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
     };
-    const bindingFlags: u32 = zvkw.zvk.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
-        zvkw.zvk.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+    const bindlessBindingFlags = [2]u32{
+        zvkw.zvk.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | zvkw.zvk.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
+        0,
+    };
     const bindingFlagsCI = zvkw.zvk.VkDescriptorSetLayoutBindingFlagsCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindingFlags = &bindingFlags,
+        .bindingCount = 2,
+        .pBindingFlags = &bindlessBindingFlags,
     };
     const bindlessLayoutCI = zvkw.zvk.VkDescriptorSetLayoutCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .flags = zvkw.zvk.VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
         .pNext = &bindingFlagsCI,
-        .bindingCount = 1,
-        .pBindings = &textureBinding,
+        .bindingCount = 2,
+        .pBindings = &bindlessBindings,
     };
     result = zvkw.zvk.vkCreateDescriptorSetLayout(ctx.m_Device, &bindlessLayoutCI, null, &ctx.bindlessDescriptorSetLayout);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorSetLayoutFailed;
 }
 
 pub fn createDescriptorPool(ctx: *zvkw.VulkanContext) !void {
-    const poolSize = [2]zvkw.zvk.VkDescriptorPoolSize{
+    const poolSize = [3]zvkw.zvk.VkDescriptorPoolSize{
         .{
             .type = zvkw.zvk.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .descriptorCount = zvkw.max_frames_in_flight,
         },
         .{
             .type = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = zvkw.MAX_TEXTURES,
+            .descriptorCount = zvkw.MAX_TEXTURES + zvkw.max_frames_in_flight,
+        },
+        .{
+            .type = zvkw.zvk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
         },
     };
     const poolCI = zvkw.zvk.VkDescriptorPoolCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .flags = zvkw.zvk.VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
         .maxSets = zvkw.max_frames_in_flight + 1,
-        .poolSizeCount = 2,
+        .poolSizeCount = 3,
         .pPoolSizes = &poolSize,
     };
     const result = zvkw.zvk.vkCreateDescriptorPool(ctx.m_Device, &poolCI, null, &ctx.descriptorPool);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorPoolFailed;
+}
+
+pub fn writeShadowDescriptor(ctx: *zvkw.VulkanContext) void {
+    for (0..zvkw.max_frames_in_flight) |i| {
+        const imageInfo = zvkw.zvk.VkDescriptorImageInfo{
+            .sampler = ctx.shadowSampler,
+            .imageView = ctx.shadowImageView,
+            .imageLayout = zvkw.zvk.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        };
+        const write = zvkw.zvk.VkWriteDescriptorSet{
+            .sType = zvkw.zvk.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = ctx.uboDescriptorSets[i],
+            .dstBinding = 1,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &imageInfo,
+        };
+        zvkw.zvk.vkUpdateDescriptorSets(ctx.m_Device, 1, &write, 0, null);
+    }
+}
+
+pub fn writeMaterialDescriptor(ctx: *zvkw.VulkanContext) void {
+    const bufferInfo = zvkw.zvk.VkDescriptorBufferInfo{
+        .buffer = ctx.materialBuffer,
+        .offset = 0,
+        .range = zvkw.zvk.VK_WHOLE_SIZE,
+    };
+    const write = zvkw.zvk.VkWriteDescriptorSet{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = ctx.bindlessDescriptorSet,
+        .dstBinding = 1,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pBufferInfo = &bufferInfo,
+    };
+    zvkw.zvk.vkUpdateDescriptorSets(ctx.m_Device, 1, &write, 0, null);
 }
 
 pub fn createSampler(ctx: *zvkw.VulkanContext) !void {

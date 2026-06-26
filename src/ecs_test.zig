@@ -11,8 +11,36 @@ comptime {
     _ = @import("engine/ecs/systems/movement_system.zig");
     _ = @import("engine/ecs/systems/input_system.zig");
     _ = @import("engine/ecs/systems/shared_state.zig");
+    _ = @import("engine/ecs/systems/transform_system.zig");
+    _ = @import("engine/ecs/systems/hierarchy_system.zig");
     // Math
     _ = @import("engine/math.zig");
+    // Timer
+    _ = @import("engine/timer.zig");
+    // Logging
+    _ = @import("engine/log.zig");
+    // Assertions
+    _ = @import("engine/assert.zig");
+    // Filesystem
+    _ = @import("engine/fs.zig");
+    // Pool allocator
+    _ = @import("engine/pool.zig");
+    // Generic async asset manager
+    _ = @import("engine/assets.zig");
+    // OBJ mesh import
+    _ = @import("resources/objLoader.zig");
+    // JSON material loader
+    _ = @import("resources/materialLoader.zig");
+    // Hot reload file watcher
+    _ = @import("engine/hotreload.zig");
+    // Job system
+    _ = @import("engine/jobs.zig");
+    // INI config loader
+    _ = @import("engine/ini.zig");
+    // UUID
+    _ = @import("engine/uuid.zig");
+    // Input edge detection
+    _ = @import("engine/input.zig");
     // Resources
     _ = @import("resources/meshCache.zig");
 }

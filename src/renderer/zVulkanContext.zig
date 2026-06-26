@@ -9,9 +9,14 @@ pub const max_frames_in_flight = 2;
 pub const validationLayers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
 pub const TextureHandle: type = u32;
 pub const MAX_TEXTURES: u32 = 1024;
+pub const MaterialHandle: type = u32;
+pub const MAX_MATERIALS: u32 = 1024;
 
 pub const default_window_width: u16 = 800;
 pub const default_window_height: u16 = 600;
+
+pub const SHADOW_MAP_SIZE: u32 = 2048;
+pub const SHADOW_MAP_FORMAT: zvk.VkFormat = zvk.VK_FORMAT_D32_SFLOAT;
 
 pub const ShaderData = struct {
     projection: [4][4]f32,
@@ -31,17 +36,34 @@ pub const Vertex = struct {
 };
 pub const PushConstants = struct {
     model: [4][4]f32,
-    textureIndex: u32,
+    materialIndex: u32,
     pad: [3]u32 = .{ 0, 0, 0 },
+};
+pub const ShadowPushConstants = struct {
+    mvp: [4][4]f32,
 };
 pub const FrameUBO = struct {
     projection: [4][4]f32,
     view: [4][4]f32,
+    light_view_proj: [4][4]f32,
+    light_dir: [4]f32, // xyz = direction, w unused
+    light_color: [4]f32, // xyz = color, w = ambient
+    camera_pos: [4]f32, // xyz = world-space camera position, for specular
 };
 pub const TextureSlot = struct {
     image: zvk.VkImage = null,
     view: zvk.VkImageView = null,
     allocation: vma.VmaAllocation = null,
+};
+
+/// Mirrors the `MaterialData` struct in shader.slang — keep field order and
+/// types in sync (std430-ish: no implicit padding needed since it's all
+/// 4-byte scalars already aligned to 4).
+pub const MaterialGpuData = extern struct {
+    metallic: f32 = 0.0,
+    roughness: f32 = 0.5,
+    albedo_texture_index: u32 = 0,
+    _pad: u32 = 0,
 };
 
 pub const VulkanContext = struct {
@@ -90,6 +112,21 @@ pub const VulkanContext = struct {
     shaderDataBuffers: [max_frames_in_flight]ShaderDataBuffer = undefined,
     textureSlots: [MAX_TEXTURES]TextureSlot = undefined,
     textureCount: u32 = 0,
+
+    materialBuffer: zvk.VkBuffer = null,
+    materialBufferAllocation: vma.VmaAllocation = null,
+    materialBufferMapped: ?[*]MaterialGpuData = null,
+    materialCount: u32 = 0,
+
+    shadowImage: zvk.VkImage = null,
+    shadowImageView: zvk.VkImageView = null,
+    shadowImageAllocation: vma.VmaAllocation = null,
+    shadowImageLayout: zvk.VkImageLayout = zvk.VK_IMAGE_LAYOUT_UNDEFINED,
+    shadowSampler: zvk.VkSampler = null,
+    shadowPipeline: zvk.VkPipeline = null,
+    shadowPipelineLayout: zvk.VkPipelineLayout = null,
+
+    vsync: bool = true,
 };
 
 pub var ctx: VulkanContext = .{};

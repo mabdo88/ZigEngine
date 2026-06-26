@@ -6,7 +6,7 @@ ZigEngine started life as a C++ project and was rewritten in Zig for its simplic
 
 > **Naming:** the engine is **ZigEngine**; the game being built on it is **Strife**, an isometric ARPG (hero-tier entities are **Emenders**, horde enemies are **Knaves**). These product names appear in the [`ecs-research/`](ecs-research/) module.
 
-> **Status:** early / pre-alpha. The renderer loads glTF models with PBR base-color textures, scenes can be hot-swapped at runtime, and the ECS drives a priority-ordered system pipeline with delta-time updates. APIs change frequently (see [Platform support](#platform-support)).
+> **Status:** early / pre-alpha. The renderer loads glTF and OBJ models with PBR materials, draws directional-light shadows with PCF filtering, hot-reloads shaders on save, and scenes can be hot-swapped at runtime; the ECS drives a priority-ordered system pipeline with delta-time updates, entity hierarchy/parenting, and an async asset manager. APIs change frequently (see [Platform support](#platform-support)).
 
 ---
 
@@ -35,6 +35,14 @@ ZigEngine started life as a C++ project and was rewritten in Zig for its simplic
 - **Allocation-error-safe ECS** — `errdefer` rollback in component storage and registry; generation-overflow slot retirement prevents entity ID reuse collisions.
 - **Background scene preloading** — non-active scenes load on a background thread; GPU uploads are deferred to the main thread and gate scene activation until complete.
 - **Cross-system shared state** — `shared_state.zig` exposes globals (window pointer, aspect ratio, fly-camera input) to systems without explicit wiring.
+- **Directional lighting & shadow mapping** — Blinn-Phong diffuse + ambient lighting; a 2048×2048 depth-only shadow map with 3×3 PCF filtering, rendered via dynamic rendering with sync2 barriers.
+- **Entity hierarchy** — `setParent`/`clearParent` with cycle- and orphan-safe `FinalTransformComponent` propagation up the parent chain via `HierarchySystem`.
+- **OBJ model loading** — fan-triangulated `objLoader.zig` parser (v/vn/vt/f, attribute-triple dedup, negative indices), routed through the same scene pipeline as glTF; materials loaded from a sibling JSON file via `materialLoader.zig`.
+- **Bindless material buffer** — a single `StructuredBuffer<MaterialData>` (metallic/roughness/albedo index) indexed by push constant, parallel to the bindless texture array.
+- **Shader hot reload** — `hotreload.zig` watches `.spv` files on a background thread (debounced) and recreates pipelines in place when shaders change, without an app restart.
+- **Async asset manager** — generic `AssetManager(T)` with generational handles, ref counting, path dedup, and background-thread loading with `unloaded`/`loading`/`ready`/`failed` states.
+- **INI-driven config overlay** — `strife.ini` overlays window size, vsync, and validation-layer settings onto `Config.default` via a hand-rolled `ini.zig` parser.
+- **`std.Io`-based platform layer** — timer, filesystem, job system, and UUID generation (`timer.zig`, `fs.zig`, `jobs.zig`, `uuid.zig`) built on Zig master's `std.Io` abstraction rather than the now-removed `std.time`/`std.fs.cwd()`/`std.Thread` primitives.
 
 ## Architecture
 
@@ -63,8 +71,9 @@ Components (`src/engine/ecs/components/components.zig`):
 | Component                 | Purpose                                                |
 | ------------------------- | ------------------------------------------------------ |
 | `MeshComponent`           | CPU-side vertices + indices (optional ownership)       |
-| `TransformComponent`      | position / rotation (Euler) / scale                    |
-| `WorldTransformComponent` | full 4×4 transform matrix from glTF                    |
+| `TransformComponent`      | position / rotation (Euler) / scale, gameplay-mutable   |
+| `BakedTransformComponent` | full 4×4 baked spawn-offset matrix from glTF            |
+| `FinalTransformComponent` | `baked * local`, recomputed every frame by TransformSystem |
 | `CameraComponent`         | eye, target, up, fov, near/far planes                  |
 | `CameraMatricesComponent` | computed view + projection matrices (written by CameraSystem) |
 | `TextureComponent`        | index into the bindless texture heap                   |
@@ -106,7 +115,7 @@ The Vulkan backend lives under `src/renderer/`:
 - **Renderer modularization**: Split the monolithic renderer into `device.zig`, `swapchain.zig`, `pipeline.zig`, `upload.zig`, and `material.zig`.
 - **Batched GPU uploads**: `UploadBatch` records multiple buffer/image transfers into a single command buffer for fewer submission stalls.
 - **Texture caching & deduplication**: `RenderSystem` caches uploaded textures by material ID to avoid re-uploading shared textures. GPU textures are reset on scene unload via the event bus.
-- **Transform system overhaul**: `WorldTransformComponent` preserves full glTF transforms while `TransformComponent` provides local overrides. The renderer combines both (world × local) for the final model matrix.
+- **Transform system overhaul**: `BakedTransformComponent` preserves full glTF transforms while `TransformComponent` provides local overrides. A dedicated `TransformSystem` recomputes `FinalTransformComponent = baked × local` once per frame; the renderer just reads it instead of redoing the multiply itself.
 - **GPU mesh refcounting**: `RenderSystem.attachMesh` with reference-counted `GpuMesh` pointers prevents double-free when multiple entities share the same mesh.
 - **Type-safe glTF node access**: `NodeView` adapter struct replaces `anytype`-based C pointer access in the glTF loader.
 
@@ -122,8 +131,20 @@ src/
 │   ├── world.zig                 VulkanWorld: registry, system runner, system state
 │   ├── config.zig                engine config (window, camera, scenes)
 │   ├── math.zig                  4×4 matrix math (lookAt, perspective, transformToMatrix)
+│   ├── assert.zig                strife_assert (compiles out in non-Debug)
+│   ├── assets.zig                generic AssetManager(T): handles, ref counting, async load
+│   ├── fs.zig                    std.Io.Dir-based filesystem helpers
+│   ├── hotreload.zig             debounced FileWatcher (drives shader hot reload)
+│   ├── ini.zig                   INI parser (strife.ini config overlay)
+│   ├── input.zig                 InputState: isDown/justPressed/justReleased
+│   ├── jobs.zig                  JobSystem on std.Io.Group (concurrent/await)
+│   ├── log.zig                   leveled logging with @src() + ANSI color
+│   ├── pool.zig                  PoolAllocator(T) index-handle free list
+│   ├── timer.zig                 Timer on std.Io.Clock
+│   ├── uuid.zig                  UUID v4 on std.Io.random
 │   └── ecs/                      entity-component-system
 │       ├── event.zig             EventBus (pub/sub)
+│       ├── README.md             ECS storage/benchmark notes
 │       ├── components/
 │       │   └── components.zig    all component definitions
 │       ├── entity/
@@ -138,6 +159,8 @@ src/
 │           ├── scene_system.zig  background preload, scene load/unload, entity spawning
 │           ├── movement_system.zig  delta-time animation
 │           ├── camera_system.zig fly-cam movement + view/projection matrices
+│           ├── transform_system.zig  FinalTransformComponent = baked * local
+│           ├── hierarchy_system.zig  parent-chain transform propagation
 │           └── render_system.zig ECS render system (delegates to renderer)
 ├── renderer/                     Vulkan renderer
 │   ├── zVulkanContext.zig        VulkanContext struct + constants
@@ -158,6 +181,8 @@ src/
 ├── resources/                    resource loading
 │   ├── meshLoader.zig            glTF loader (NodeView, primitives, materials)
 │   ├── meshCache.zig             deduplicated mesh storage keyed by mesh ID
+│   ├── objLoader.zig             OBJ loader (v/vn/vt/f, fan triangulation, dedup)
+│   ├── materialLoader.zig        sibling-JSON material loader for OBJ meshes
 │   └── cgltf.zig                 cgltf C bindings
 ├── shaders/                      Slang shaders + compiled SPIR-V
 │   ├── shader.slang              main vertex/fragment shader
@@ -224,18 +249,23 @@ zig build -Dvulkan-sdk=/path/to/VulkanSDK/1.4.341.1
 
 ## Roadmap
 
-Core-engine milestones being worked toward before gameplay:
+Milestones M0–M2 (foundation, ECS, assets) are complete; M3 (renderer) is in progress. See `CLAUDE.md` for the full per-task breakdown.
 
-- [ ] Swapchain recreation / window resize handling
-- [ ] Refactor global Vulkan state into a passed context
-- [ ] Material system beyond base-color textures
-- [ ] Lighting
 - [x] ~~Scene/asset management and a proper update loop with delta time~~
 - [x] ~~Input system~~
 - [x] ~~Cross-platform build (Windows/Linux/macOS link steps)~~
 - [x] ~~System lifecycle management (create/destroy)~~
 - [x] ~~Fly camera controls (mouse-look + WASD)~~
 - [x] ~~Background scene preloading~~
+- [x] ~~Swapchain recreation / window resize handling~~
+- [x] ~~Material system beyond base-color textures (bindless metallic/roughness buffer)~~
+- [x] ~~Lighting and shadow mapping~~
+- [x] ~~Entity hierarchy / parenting~~
+- [x] ~~Shader hot reload~~
+- [x] ~~Async asset manager~~
+- [ ] Debug draw (`dd_axes`/`dd_box`/`dd_sphere`)
+- [ ] Animation (M4)
+- [ ] Physics via Jolt (M5)
 
 ## Acknowledgements
 

@@ -4,7 +4,28 @@ const components = @import("ecs/components/components.zig");
 pub const CameraMatrices = struct {
     view: [4][4]f32,
     projection: [4][4]f32,
+    position: @Vector(3, f32),
 };
+
+pub const SceneLight = struct {
+    direction: @Vector(3, f32),
+    color: @Vector(3, f32),
+    ambient: f32,
+    shadow_half_extent: f32,
+    shadow_distance: f32,
+    shadow_near: f32,
+    shadow_far: f32,
+};
+
+/// Light-space view-projection for a directional light, framing a fixed box around the world origin.
+pub fn directionalLightViewProj(light: SceneLight) [4][4]f32 {
+    const up: @Vector(3, f32) = if (@abs(light.direction[1]) > 0.99) .{ 0.0, 0.0, 1.0 } else .{ 0.0, 1.0, 0.0 };
+    const target: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 };
+    const eye = target - light.direction * @as(@Vector(3, f32), @splat(light.shadow_distance));
+    const view = lookAt(eye, target, up);
+    const proj = orthographicSymmetric(light.shadow_half_extent, light.shadow_near, light.shadow_far);
+    return matMul(proj, view);
+}
 
 pub fn identityMatrix() [4][4]f32 {
     return .{
@@ -72,6 +93,16 @@ pub fn perspective(fov: f32, near: f32, far: f32, aspect: f32) [4][4]f32 {
         .{ 0.0, -1.0 / tanHalfFov, 0.0, 0.0 },
         .{ 0.0, 0.0, far / (near - far), -1.0 },
         .{ 0.0, 0.0, -(far * near) / (far - near), 0.0 },
+    };
+}
+
+/// Symmetric orthographic projection: x/y in [-half_extent, half_extent], Vulkan depth [0,1], Y-flipped to match perspective().
+pub fn orthographicSymmetric(half_extent: f32, near: f32, far: f32) [4][4]f32 {
+    return [4][4]f32{
+        .{ 1.0 / half_extent, 0.0, 0.0, 0.0 },
+        .{ 0.0, -1.0 / half_extent, 0.0, 0.0 },
+        .{ 0.0, 0.0, 1.0 / (near - far), 0.0 },
+        .{ 0.0, 0.0, near / (near - far), 1.0 },
     };
 }
 

@@ -18,9 +18,9 @@ pub fn ComponentIndex(comptime T: type) comptime_int {
 pub const AllComponents = .{
     MeshComponent,
     TransformComponent,
-    WorldTransformComponent,
+    BakedTransformComponent,
     CameraComponent,
-    TextureComponent,
+    MaterialComponent,
     SceneComponent,
     SceneActiveTag,
     ScenePendingTag,
@@ -28,6 +28,8 @@ pub const AllComponents = .{
     SceneOwnedComponent,
     CameraMatricesComponent,
     TextureDataComponent,
+    FinalTransformComponent,
+    ParentComponent,
 };
 
 pub const MeshComponent = struct {
@@ -50,8 +52,22 @@ pub const TransformComponent = struct {
     scale: @Vector(3, f32),
 };
 
-pub const WorldTransformComponent = struct {
+pub const BakedTransformComponent = struct {
     matrix: [4][4]f32,
+};
+
+/// world = BakedTransformComponent.matrix * transformToMatrix(TransformComponent),
+/// recomputed every frame by TransformSystem. Renderers (and any future
+/// system) read this instead of redoing the matMul themselves.
+pub const FinalTransformComponent = struct {
+    matrix: [4][4]f32,
+};
+
+/// Presence means this entity's FinalTransformComponent should be
+/// concatenated under `parent`'s, by HierarchySystem. Absence means the
+/// entity is a root — its FinalTransformComponent is already a world matrix.
+pub const ParentComponent = struct {
+    parent: Entity,
 };
 
 pub const CameraComponent = struct {
@@ -63,8 +79,8 @@ pub const CameraComponent = struct {
     far: f32 = 10000.0,
 };
 
-pub const TextureComponent = struct {
-    textureIndex: u32,
+pub const MaterialComponent = struct {
+    material_index: u32,
 };
 
 pub const SceneComponent = struct {

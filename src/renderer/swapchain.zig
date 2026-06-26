@@ -9,6 +9,7 @@ pub fn createSwapchain(ctx: *zvkw.VulkanContext) !void {
     const surfaceFormat = try pickSurfaceFormat(ctx);
     ctx.colorFormat = surfaceFormat.format;
     ctx.colorSpace = surfaceFormat.colorSpace;
+    const presentMode = try pickPresentMode(ctx);
 
     var surfaceCaps: zvkw.zvk.VkSurfaceCapabilitiesKHR = undefined;
     try check(zvkw.zvk.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.m_physicalDevice, ctx.m_surface, &surfaceCaps));
@@ -36,7 +37,7 @@ pub fn createSwapchain(ctx: *zvkw.VulkanContext) !void {
         .pQueueFamilyIndices = &ctx.queueFamilyIndex,
         .preTransform = surfaceCaps.currentTransform,
         .compositeAlpha = zvkw.zvk.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = zvkw.zvk.VK_PRESENT_MODE_FIFO_KHR,
+        .presentMode = presentMode,
         .clipped = zvkw.zvk.VK_TRUE,
         .oldSwapchain = ctx.swapChain,
     };
@@ -128,6 +129,24 @@ fn pickSurfaceFormat(ctx: *zvkw.VulkanContext) !zvkw.zvk.VkSurfaceFormatKHR {
         }
     }
     return formats[0];
+}
+
+/// FIFO is always supported and is what vsync=true wants. When vsync is
+/// disabled, prefer MAILBOX (low-latency, no tearing) and fall back to FIFO
+/// if the surface doesn't support it.
+fn pickPresentMode(ctx: *zvkw.VulkanContext) !zvkw.zvk.VkPresentModeKHR {
+    if (ctx.vsync) return zvkw.zvk.VK_PRESENT_MODE_FIFO_KHR;
+
+    var modeCount: u32 = 0;
+    try check(zvkw.zvk.vkGetPhysicalDeviceSurfacePresentModesKHR(ctx.m_physicalDevice, ctx.m_surface, &modeCount, null));
+    const modes = try ctx.zallocator.alloc(zvkw.zvk.VkPresentModeKHR, modeCount);
+    defer ctx.zallocator.free(modes);
+    try check(zvkw.zvk.vkGetPhysicalDeviceSurfacePresentModesKHR(ctx.m_physicalDevice, ctx.m_surface, &modeCount, modes.ptr));
+
+    for (modes) |mode| {
+        if (mode == zvkw.zvk.VK_PRESENT_MODE_MAILBOX_KHR) return mode;
+    }
+    return zvkw.zvk.VK_PRESENT_MODE_FIFO_KHR;
 }
 
 pub fn createDepthImage(ctx: *zvkw.VulkanContext) !void {
