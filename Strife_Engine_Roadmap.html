@@ -1656,10 +1656,12 @@ function getKey(id){ return 'strife_'+id; }
 const DEFAULT_DONE = new Set([
   'm0t0','m0t1','m0t2','m0t3','m0t4','m0t5','m0t6','m0t7','m0t8','m0t9','m0t10','m0t11',
   'm1t0','m1t1','m1t2','m1t3','m1t4','m1t5','m1t6','m1t7',
-  'm2t0','m2t1','m2t2','m2t3','m2t4','m2t6',
+  'm2t0','m2t1','m2t2','m2t3','m2t4','m2t5','m2t6',
   'm3t0','m3t1','m3t2','m3t3','m3t4','m3t5','m3t6','m3t7','m3t8'
 ]);
-const DEFAULT_PARTIAL = new Set([]);
+const DEFAULT_PARTIAL = new Set([
+  'm4t0'
+]);
 
 function isDone(id){
   const v=localStorage.getItem(getKey(id));
