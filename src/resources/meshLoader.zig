@@ -5,6 +5,7 @@ const stbi = @import("stbimport");
 const components = @import("../engine/ecs/components/components.zig");
 const math = @import("../engine/math.zig");
 const log = @import("../engine/log.zig");
+const skeleton = @import("../animation/skeleton.zig");
 
 pub const MeshData = struct {
     vertices: []components.Vertex,
@@ -72,6 +73,7 @@ pub const GltfScene = struct {
     meshes: []MeshData,
     materials: []MaterialData,
     primitives: []ScenePrimitive,
+    skeletons: []skeleton.Skeleton = &.{},
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *GltfScene) void {
@@ -85,8 +87,83 @@ pub const GltfScene = struct {
         }
         self.allocator.free(self.materials);
         self.allocator.free(self.primitives);
+        for (self.skeletons) |*sk| sk.deinit();
+        self.allocator.free(self.skeletons);
     }
 };
+
+/// Builds a runtime `Skeleton` from a cgltf skin: remaps joints into
+/// topological order (parent_indices[i] < i for every i) so
+/// `computeSkinMatrices` can do a single forward sweep, since cgltf doesn't
+/// guarantee the skin's joint array is already in that order.
+fn loadSkin(allocator: std.mem.Allocator, skin: *gltf.cgltf_skin) !skeleton.Skeleton {
+    const n = skin.joints_count;
+    if (n == 0) return error.gltfEmptySkin;
+
+    var node_to_index = std.AutoHashMap(usize, u32).init(allocator);
+    defer node_to_index.deinit();
+    for (0..n) |i| try node_to_index.put(@intFromPtr(skin.joints[i]), @intCast(i));
+
+    const raw_parent = try allocator.alloc(i32, n);
+    defer allocator.free(raw_parent);
+    for (0..n) |i| {
+        const parent_node = skin.joints[i].*.parent;
+        raw_parent[i] = -1;
+        if (parent_node != null) {
+            if (node_to_index.get(@intFromPtr(parent_node))) |pidx| raw_parent[i] = @intCast(pidx);
+        }
+    }
+
+    const visited = try allocator.alloc(bool, n);
+    defer allocator.free(visited);
+    @memset(visited, false);
+    var order: std.ArrayListUnmanaged(u32) = .empty;
+    defer order.deinit(allocator);
+    for (0..n) |i| try visitJointTopo(@intCast(i), raw_parent, visited, &order, allocator);
+
+    const new_index_of_old = try allocator.alloc(u32, n);
+    defer allocator.free(new_index_of_old);
+    for (order.items, 0..) |old_i, new_i| new_index_of_old[old_i] = @intCast(new_i);
+
+    const parent_indices = try allocator.alloc(i32, n);
+    errdefer allocator.free(parent_indices);
+    const inverse_bind = try allocator.alloc([4][4]f32, n);
+    errdefer allocator.free(inverse_bind);
+    const rest_local = try allocator.alloc([4][4]f32, n);
+    errdefer allocator.free(rest_local);
+
+    for (order.items, 0..) |old_i, new_i| {
+        const p_old = raw_parent[old_i];
+        parent_indices[new_i] = if (p_old < 0) -1 else @intCast(new_index_of_old[@intCast(p_old)]);
+
+        var ibm: [4][4]f32 = math.identityMatrix();
+        if (skin.inverse_bind_matrices != null) {
+            var flat: [16]f32 = undefined;
+            _ = gltf.cgltf_accessor_read_float(skin.inverse_bind_matrices, old_i, &flat, 16);
+            @memcpy(@as([*]f32, @ptrCast(&ibm)), &flat);
+        }
+        inverse_bind[new_i] = ibm;
+
+        const joint_view = NodeView{ .node = @ptrCast(skin.joints[old_i]) };
+        rest_local[new_i] = joint_view.localTransform();
+    }
+
+    return skeleton.Skeleton{
+        .joint_count = @intCast(n),
+        .parent_indices = parent_indices,
+        .inverse_bind_matrices = inverse_bind,
+        .rest_local_transforms = rest_local,
+        .allocator = allocator,
+    };
+}
+
+fn visitJointTopo(i: u32, raw_parent: []const i32, visited: []bool, order: *std.ArrayListUnmanaged(u32), allocator: std.mem.Allocator) !void {
+    if (visited[i]) return;
+    const p = raw_parent[i];
+    if (p >= 0) try visitJointTopo(@intCast(p), raw_parent, visited, order, allocator);
+    visited[i] = true;
+    try order.append(allocator, i);
+}
 
 pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
     var options = std.mem.zeroes(gltf.cgltf_options);
@@ -268,14 +345,25 @@ pub fn loadgltf(allocator: std.mem.Allocator, path: [:0]const u8) !GltfScene {
         }
     }
 
-    log.info(@src(), "loadgltf: {d} mesh(es), {d} material(s), {d} primitive(s)", .{
-        mesh_list.items.len, mat_list.items.len, prim_list.items.len,
+    var skel_list: std.ArrayListUnmanaged(skeleton.Skeleton) = .empty;
+    errdefer {
+        for (skel_list.items) |*sk| sk.deinit();
+        skel_list.deinit(allocator);
+    }
+    for (0..data.*.skins_count) |si| {
+        const sk = try loadSkin(allocator, @ptrCast(&data.*.skins[si]));
+        try skel_list.append(allocator, sk);
+    }
+
+    log.info(@src(), "loadgltf: {d} mesh(es), {d} material(s), {d} primitive(s), {d} skeleton(s)", .{
+        mesh_list.items.len, mat_list.items.len, prim_list.items.len, skel_list.items.len,
     });
 
     return GltfScene{
         .meshes = try mesh_list.toOwnedSlice(allocator),
         .materials = try mat_list.toOwnedSlice(allocator),
         .primitives = try prim_list.toOwnedSlice(allocator),
+        .skeletons = try skel_list.toOwnedSlice(allocator),
         .allocator = allocator,
     };
 }
