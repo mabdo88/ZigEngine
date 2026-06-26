@@ -114,6 +114,7 @@ pub fn build(b: *std.Build) void {
     const shader_specs = [_]ShaderSpec{
         .{ .src = "src/shaders/shader.slang", .out = "src/shaders/slang.spv", .entries = &.{ "vertMain", "fragMain" } },
         .{ .src = "src/shaders/shadow.slang", .out = "src/shaders/shadow.spv", .entries = &.{"vertMain"} },
+        .{ .src = "src/shaders/debug.slang", .out = "src/shaders/debug.spv", .entries = &.{ "vertMain", "fragMain" } },
     };
 
     const shaders_step = b.step("shaders", "Compile .slang shaders to .spv via slangc");

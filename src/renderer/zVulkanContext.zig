@@ -18,6 +18,8 @@ pub const default_window_height: u16 = 600;
 pub const SHADOW_MAP_SIZE: u32 = 2048;
 pub const SHADOW_MAP_FORMAT: zvk.VkFormat = zvk.VK_FORMAT_D32_SFLOAT;
 
+pub const MAX_DEBUG_VERTICES: u32 = 65536;
+
 pub const ShaderData = struct {
     projection: [4][4]f32,
     view: [4][4]f32,
@@ -49,6 +51,10 @@ pub const FrameUBO = struct {
     light_dir: [4]f32, // xyz = direction, w unused
     light_color: [4]f32, // xyz = color, w = ambient
     camera_pos: [4]f32, // xyz = world-space camera position, for specular
+};
+pub const DebugVertex = struct {
+    pos: @Vector(3, f32),
+    color: @Vector(3, f32),
 };
 pub const TextureSlot = struct {
     image: zvk.VkImage = null,
@@ -125,6 +131,10 @@ pub const VulkanContext = struct {
     shadowSampler: zvk.VkSampler = null,
     shadowPipeline: zvk.VkPipeline = null,
     shadowPipelineLayout: zvk.VkPipelineLayout = null,
+
+    debugPipeline: zvk.VkPipeline = null,
+    debugPipelineLayout: zvk.VkPipelineLayout = null,
+    debugVertexBuffers: [max_frames_in_flight]ShaderDataBuffer = undefined,
 
     vsync: bool = true,
 };

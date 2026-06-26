@@ -75,6 +75,8 @@ pub const RenderSystemState = struct {
             .shadow_far = shared_state.light.shadow_far,
         };
 
+        renderer.ddAxes(.{ 0.0, 0.0, 0.0 }, 1.0);
+
         try renderer.render(matrices, light, registry, &self.gpu_system, dt);
     }
 
@@ -132,4 +134,20 @@ pub fn destroy(allocator: std.mem.Allocator, registry: *Registry, ctx: *anyopaqu
 
 pub fn getGpuSystem() *rs.RenderSystem {
     return &render_state_ptr.?.gpu_system;
+}
+
+pub fn ddLine(a: @Vector(3, f32), b: @Vector(3, f32), color: @Vector(3, f32)) void {
+    renderer.ddLine(a, b, color);
+}
+
+pub fn ddAxes(origin: @Vector(3, f32), scale: f32) void {
+    renderer.ddAxes(origin, scale);
+}
+
+pub fn ddBox(min: @Vector(3, f32), max: @Vector(3, f32), color: @Vector(3, f32)) void {
+    renderer.ddBox(min, max, color);
+}
+
+pub fn ddSphere(center: @Vector(3, f32), radius: f32, segments: u32, color: @Vector(3, f32)) void {
+    renderer.ddSphere(center, radius, segments, color);
 }
