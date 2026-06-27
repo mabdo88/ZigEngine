@@ -39,12 +39,27 @@ pub const MouseButton = struct {
 };
 
 var g_resized: bool = false;
+var g_key_state: [512]bool = [_]bool{false} ** 512;
+var g_window_handle: ?*c.GLFWwindow = null;
 
 fn framebufferResizeCallback(win: ?*c.GLFWwindow, width: c_int, height: c_int) callconv(.c) void {
     _ = win;
     _ = width;
     _ = height;
     g_resized = true;
+}
+
+fn keyCallback(win: ?*c.GLFWwindow, key: c_int, scancode: c_int, action: c_int, mods: c_int) callconv(.c) void {
+    _ = win;
+    _ = scancode;
+    _ = mods;
+    if (key >= 0 and key < 512) {
+        if (action == c.GLFW_PRESS or action == c.GLFW_REPEAT) {
+            g_key_state[@intCast(key)] = true;
+        } else if (action == c.GLFW_RELEASE) {
+            g_key_state[@intCast(key)] = false;
+        }
+    }
 }
 
 pub const Window = struct {
@@ -54,32 +69,6 @@ pub const Window = struct {
 
     pub fn shouldClose(self: *const Window) bool {
         return c.glfwWindowShouldClose(self.handle) != 0;
-    }
-
-    pub fn getKey(self: *const Window, key: c_int) bool {
-        return c.glfwGetKey(self.handle, key) == c.GLFW_PRESS;
-    }
-
-    pub fn getMouseButton(self: *const Window, button: c_int) bool {
-        return c.glfwGetMouseButton(self.handle, button) == c.GLFW_PRESS;
-    }
-
-    pub const CursorPos = struct { x: f64, y: f64 };
-
-    pub fn getCursorPos(self: *const Window) CursorPos {
-        var x: f64 = 0;
-        var y: f64 = 0;
-        c.glfwGetCursorPos(self.handle, &x, &y);
-        return .{ .x = x, .y = y };
-    }
-
-    pub const CursorMode = enum(c_int) {
-        normal = c.GLFW_CURSOR_NORMAL,
-        disabled = c.GLFW_CURSOR_DISABLED,
-    };
-
-    pub fn setCursorMode(self: *const Window, mode: CursorMode) void {
-        c.glfwSetInputMode(self.handle, c.GLFW_CURSOR, @intFromEnum(mode));
     }
 
     pub const Size = struct { width: u32, height: u32 };
@@ -144,7 +133,27 @@ pub fn create(title: [:0]const u8, width: u32, height: u32, resizable: bool) !Wi
         null,
     ) orelse return error.WindowCreateFailed;
     _ = c.glfwSetFramebufferSizeCallback(handle, framebufferResizeCallback);
+    g_window_handle = handle;
     return .{ .handle = handle, .width = width, .height = height };
+}
+
+pub fn setKeyState(key: i32, pressed: bool) void {
+    if (key >= 0 and key < 512) {
+        g_key_state[@intCast(key)] = pressed;
+    }
+}
+
+pub fn getKeyState(key: i32) bool {
+    if (key >= 0 and key < 512) {
+        return g_key_state[@intCast(key)];
+    }
+    return false;
+}
+
+pub fn installKeyCallback() void {
+    if (g_window_handle) |handle| {
+        _ = c.glfwSetKeyCallback(handle, keyCallback);
+    }
 }
 
 pub fn requiredInstanceExtensions(allocator: std.mem.Allocator) ![]const [*c]const u8 {

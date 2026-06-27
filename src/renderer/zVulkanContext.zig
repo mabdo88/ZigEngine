@@ -91,5 +91,3 @@ pub const VulkanContext = struct {
     textureSlots: [MAX_TEXTURES]TextureSlot = undefined,
     textureCount: u32 = 0,
 };
-
-pub var ctx: VulkanContext = .{};

@@ -128,7 +128,6 @@ pub const World = struct {
         for (component_ids, 0..) |cid, i| {
             if (i >= 32) break;
             desc.terms[i].id = cid;
-            desc.terms[i].first.id = cid;
         }
         const q = flecs.ecs_query_init(self.world, &desc) orelse @panic("ecs_query_init failed");
         return .{ .query = q, .world = self.world };
@@ -164,6 +163,41 @@ pub const World = struct {
             if (i >= 32) break;
             desc.query.terms[i].id = cid;
             desc.query.terms[i].first.id = cid;
+        }
+        return flecs.ecs_system_init(self.world, &desc);
+    }
+
+    pub const Term = struct {
+        id: Entity,
+        inout: i16 = 0,
+        is_singleton: bool = false,
+    };
+
+    pub fn systemWithTerms(
+        self: *World,
+        name: [*:0]const u8,
+        phase: Entity,
+        terms: []const Term,
+        callback: flecs.ecs_iter_action_t,
+        ctx: ?*anyopaque,
+    ) Entity {
+        var edesc = std.mem.zeroes(flecs.ecs_entity_desc_t);
+        edesc.name = name;
+        const ent = flecs.ecs_entity_init(self.world, &edesc);
+
+        var desc = std.mem.zeroes(flecs.ecs_system_desc_t);
+        desc.entity = ent;
+        desc.phase = phase;
+        desc.callback = callback;
+        if (ctx) |ctx_val| desc.ctx = ctx_val;
+        for (terms, 0..) |t, i| {
+            if (i >= 32) break;
+            desc.query.terms[i].id = t.id;
+            desc.query.terms[i].first.id = t.id;
+            desc.query.terms[i].inout = t.inout;
+            if (t.is_singleton) {
+                desc.query.terms[i].src.id = t.id | flecs.EcsIsEntity;
+            }
         }
         return flecs.ecs_system_init(self.world, &desc);
     }
@@ -334,6 +368,10 @@ pub fn preUpdate() Entity {
 
 pub fn onUpdate() Entity {
     return flecs.EcsOnUpdate;
+}
+
+pub fn onValidate() Entity {
+    return flecs.EcsOnValidate;
 }
 
 pub fn postUpdate() Entity {

@@ -51,10 +51,6 @@ pub fn build(b: *std.Build) void {
 
     exe.is_linking_libcpp = true;
     b.installArtifact(exe);
-    exe.root_module.addCSourceFile(.{ .file = b.path("src/native/cgltf_impl.c") });
-    exe.root_module.addCSourceFile(.{ .file = b.path("src/native/stb_image_impl.c") });
-    exe.root_module.addIncludePath(b.path("deps/cgltf/"));
-    exe.root_module.addIncludePath(b.path("deps/stb/"));
     exe.root_module.addIncludePath(b.path("deps/vma/"));
 
     // Flecs: translate the C header at build time (replaces @cImport).
@@ -154,29 +150,9 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
-    // ECS tests - GPU-free, minimal module
-    const ecs_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/ecs_test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "flecs_c", .module = flecs_module },
-        },
-    });
-    const ecs_tests = b.addTest(.{ .root_module = ecs_test_mod });
-    ecs_tests.root_module.linkLibrary(flecs_lib);
-    if (os_tag == .windows) {
-        ecs_tests.root_module.linkSystemLibrary("dbghelp", .{});
-        ecs_tests.root_module.linkSystemLibrary("ws2_32", .{});
-    }
-    const run_ecs_tests = b.addRunArtifact(ecs_tests);
-    const ecs_test_step = b.step("test-ecs", "Run ECS tests");
-    ecs_test_step.dependOn(&run_ecs_tests.step);
-    test_step.dependOn(&run_ecs_tests.step);
-
     // Flecs tests — needs flecs_c translated module + flecs static lib
     const flecs_test_mod = b.createModule(.{
-        .root_source_file = b.path("src/engine/ecs/flecs.zig"),
+        .root_source_file = b.path("src/flecs.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
