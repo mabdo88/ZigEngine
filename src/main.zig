@@ -29,4 +29,6 @@ comptime {
     _ = @import("scene/scene_save.zig");
     _ = @import("scene/scene_load.zig");
     _ = @import("scene/spawner.zig");
+    _ = @import("audio/audio_device.zig");
+    _ = @import("engine/ecs/systems/audio_system.zig");
 }

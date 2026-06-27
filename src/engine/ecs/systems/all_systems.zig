@@ -13,6 +13,7 @@ const trigger_system = @import("trigger_system.zig");
 const transform_system = @import("transform_system.zig");
 const hierarchy_system = @import("hierarchy_system.zig");
 const render_system = @import("render_system.zig");
+const audio_system = @import("audio_system.zig");
 
 pub const all_systems = [_]SystemDesc{
     .{ .name = "Input", .priority = -100, .create_fn = input_system.create, .update_fn = input_system.update, .destroy_fn = input_system.destroy },
@@ -28,4 +29,5 @@ pub const all_systems = [_]SystemDesc{
     .{ .name = "Transform", .priority = 50, .create_fn = transform_system.create, .update_fn = transform_system.update, .destroy_fn = transform_system.destroy },
     .{ .name = "Hierarchy", .priority = 60, .create_fn = hierarchy_system.create, .update_fn = hierarchy_system.update, .destroy_fn = hierarchy_system.destroy },
     .{ .name = "Render", .priority = 100, .create_fn = render_system.create, .update_fn = render_system.update, .destroy_fn = render_system.destroy },
+    .{ .name = "Audio", .priority = 4, .create_fn = audio_system.create, .update_fn = audio_system.update, .destroy_fn = audio_system.destroy },
 };

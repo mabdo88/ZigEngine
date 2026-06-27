@@ -49,6 +49,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     stb_translate.addIncludePath(b.path("deps/stb/"));
+
+    const miniaudio_translate = b.addTranslateC(.{
+        .root_source_file = b.path("deps/miniaudio/miniaudio.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    miniaudio_translate.addIncludePath(b.path("deps/miniaudio/"));
     // Add C++ VMA implementation
     exe.root_module.addCSourceFile(.{
         .file = b.path("src/renderer/vma_impl.cpp"),
@@ -60,9 +67,11 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
     exe.root_module.addCSourceFile(.{ .file = b.path("src/native/cgltf_impl.c") });
     exe.root_module.addCSourceFile(.{ .file = b.path("src/native/stb_image_impl.c") });
+    exe.root_module.addCSourceFile(.{ .file = b.path("src/native/miniaudio_impl.c") });
     exe.root_module.addIncludePath(b.path("deps/cgltf/"));
     exe.root_module.addIncludePath(b.path("deps/stb/"));
     exe.root_module.addIncludePath(b.path("deps/vma/"));
+    exe.root_module.addIncludePath(b.path("deps/miniaudio/"));
 
     // Jolt Physics (deps/jolt, git submodule pinned to v5.5.0) — compiled directly
     // from source, no CMake involved. We collect every Jolt/*.cpp ourselves since
@@ -70,7 +79,11 @@ pub fn build(b: *std.Build) void {
     // undefined macros (e.g. Renderer/DebugRenderer*.cpp under JPH_DEBUG_RENDERER)
     // compile to empty translation units when the macro is off, so including them
     // unconditionally is harmless.
-    const jolt_cpp_flags = &[_][]const u8{"-std=c++17"};
+    // Jolt always compiles ReleaseFast regardless of the overall build's
+    // optimize mode: Jolt's own assertions/asserts are extremely hot-path
+    // (per-contact-pair), and Debug-mode Jolt is unusably slow for any real
+    // physics test; -DNDEBUG also disables Jolt's internal JPH_ASSERT.
+    const jolt_cpp_flags = &[_][]const u8{ "-std=c++17", "-O3", "-DNDEBUG" };
     {
         const io = b.graph.io;
         var dir = std.Io.Dir.cwd().openDir(io, "deps/jolt/Jolt", .{ .iterate = true }) catch @panic("deps/jolt submodule not found — run `git submodule update --init`");
@@ -163,6 +176,29 @@ pub fn build(b: *std.Build) void {
     b.modules.put(b.allocator, "stbimport", stb_module) catch unreachable;
     mod.addImport("stbimport", stb_module);
     exe.root_module.addImport("stbimport", stb_module);
+
+    const miniaudio_module = miniaudio_translate.createModule();
+    b.modules.put(b.allocator, "miniaudioimport", miniaudio_module) catch unreachable;
+    mod.addImport("miniaudioimport", miniaudio_module);
+    exe.root_module.addImport("miniaudioimport", miniaudio_module);
+
+    // Fast-iteration test target for the audio module only (no Jolt/VMA/cgltf
+    // compile) — mirrors the test-ecs step's purpose for the audio module.
+    {
+        const audio_test = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/audio/audio_device.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        audio_test.root_module.addImport("miniaudioimport", miniaudio_module);
+        audio_test.root_module.addCSourceFile(.{ .file = b.path("src/native/miniaudio_impl.c") });
+        audio_test.root_module.addIncludePath(b.path("deps/miniaudio/"));
+        const run_audio_test = b.addRunArtifact(audio_test);
+        const audio_test_step = b.step("test-audio", "Run audio module tests only (fast iteration)");
+        audio_test_step.dependOn(&run_audio_test.step);
+    }
 
     // Run step
     const run_step = b.step("run", "Run the app");

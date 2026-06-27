@@ -44,6 +44,7 @@ pub const AllComponents = .{
     PrefabInstanceComponent,
     SpawnPointComponent,
     SpawnedByComponent,
+    AudioSourceComponent,
 };
 
 pub const MeshComponent = struct {
@@ -258,4 +259,18 @@ pub const SpawnPointComponent = struct {
 /// to decrement when this entity is destroyed.
 pub const SpawnedByComponent = struct {
     spawner: Entity,
+};
+
+/// POD only — clip_id indexes into audio/audio_shared.zig's AudioClipCache,
+/// never a direct ma_sound pointer (component data can't own a C resource
+/// directly, see PhysicsBodyComponent's body_id for the same pattern).
+/// AudioSystem flips auto_play sounds to playing=true the first time it sees
+/// them; toggling auto_play back off and on again does NOT replay the clip
+/// (playing latches), since this is a "play once on spawn" flag, not a loop
+/// control — repeat playback is audio_device.clipPlay called explicitly.
+pub const AudioSourceComponent = struct {
+    clip_id: u32 = 0,
+    volume: f32 = 1.0,
+    auto_play: bool = false,
+    playing: bool = false,
 };
