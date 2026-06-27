@@ -291,7 +291,7 @@ zig build -Dvulkan-sdk=/path/to/VulkanSDK/1.4.341.1
 
 ## Roadmap
 
-Milestones M0–M6 (foundation, ECS, assets, renderer, animation, physics, scene/prefabs/spawning) are complete. See `CLAUDE.md` for the full per-task breakdown.
+Milestones M0–M6 (foundation, ECS, assets, renderer, animation, physics, scene/prefabs/spawning) are complete, plus M7's Audio Device task. See `CLAUDE.md` for the full per-task breakdown.
 
 - [x] ~~Scene/asset management and a proper update loop with delta time~~
 - [x] ~~Input system~~
@@ -309,7 +309,8 @@ Milestones M0–M6 (foundation, ECS, assets, renderer, animation, physics, scene
 - [x] ~~Animation (M4) — skeletons, GPU skinning, AnimPlayer, blend trees, state machine, anim events~~
 - [x] ~~Physics via Jolt (M5) — collision, raycasts, character controller, triggers, collision layers~~
 - [x] ~~Scene (M6) — prefabs, spawner, scene save/load~~
-- [ ] Audio (M7)
+- [x] ~~Audio Device (M7) — miniaudio engine, clips, AudioSource component~~
+- [ ] Audio (M7) — 3D Audio, Mixer
 - [ ] UI (M8)
 - [ ] Gameplay-ready systems: health, combat, abilities, inventory, AI, projectiles, save/load (M9)
 
