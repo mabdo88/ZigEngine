@@ -480,6 +480,7 @@ canonical UI for progress tracking — keep both in sync.
 
 1. **Always read docs before writing Zig** — fetch `https://ziglang.org/documentation/master/` for any API you're unsure about.
 2. **Check the roadmap** — implement the current lowest-numbered incomplete task unless instructed otherwise.
+   - **Gameplay work: read `DOCUMENTATION.md` first.** Before implementing ANY gameplay-related feature, consult `DOCUMENTATION.md` (feature usage + §11 gameplay table + §12 "how to build a game") and reuse the existing ECS systems, components, events, and module-global registries it describes. Do NOT build parallel systems or hacky one-off plumbing — extend the engine through `all_systems.zig`-registered systems driven by components/events/data, never `main.zig` registry pokes or manual `update()` ticks. Keep `DOCUMENTATION.md` in sync when gameplay features/gaps change.
 3. **One file at a time** — implement a task fully and test it before moving to the next.
 4. **Follow the architecture decisions** — no deviations from the column-major Mat4, dynamic rendering, sync2 barriers, or ECS patterns above.
 5. **Never add a dependency without asking** — the dep list is fixed.
