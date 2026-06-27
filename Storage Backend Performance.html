@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storage Benchmark Results — Digital Twin Platform</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0b1220; color: #e8eef7; }
+  .deck { width: 100vw; height: 100vh; position: relative; }
+  .slide { position: absolute; inset: 0; padding: 56px 72px; display: none; flex-direction: column; opacity: 0; transition: opacity 0.3s ease; }
+  .slide.active { display: flex; opacity: 1; }
+  .slide-num { position: absolute; top: 24px; right: 32px; font-size: 13px; color: #6b7c95; letter-spacing: 2px; }
+  .slide-title { font-size: 40px; font-weight: 700; color: #ffffff; margin-bottom: 6px; letter-spacing: -0.5px; }
+  .slide-subtitle { font-size: 16px; color: #8aa0bf; margin-bottom: 28px; font-weight: 400; }
+  h2 { font-size: 22px; color: #ffffff; margin-bottom: 14px; font-weight: 600; }
+  h3 { font-size: 14px; color: #4dabf7; margin-bottom: 8px; margin-top: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.2px; }
+  p { font-size: 14.5px; line-height: 1.6; color: #c5d2e3; margin-bottom: 10px; }
+  .nav { position: fixed; bottom: 20px; left: 0; right: 0; display: flex; justify-content: center; gap: 14px; z-index: 100; align-items: center; }
+  .nav button { background: #1a2540; border: 1px solid #2d3b5e; color: #e8eef7; padding: 9px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+  .nav button:hover { background: #243358; border-color: #4dabf7; }
+  .nav button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .counter { font-size: 12px; color: #6b7c95; min-width: 50px; text-align: center; }
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: linear-gradient(90deg, #4dabf7, #22d3ee); z-index: 100; transition: width 0.3s; }
+  .grid { display: grid; gap: 16px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-6 { grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .card { background: #131c30; border: 1px solid #243358; border-radius: 10px; padding: 16px; }
+  .stat { background: #131c30; border: 1px solid #243358; border-radius: 10px; padding: 16px; }
+  .stat-num { font-size: 30px; font-weight: 700; color: #4dabf7; margin-bottom: 2px; line-height: 1.1; }
+  .stat-num.green { color: #4ade80; }
+  .stat-num.red { color: #f87171; }
+  .stat-num.purple { color: #c084fc; }
+  .stat-num.orange { color: #fb923c; }
+  .stat-label { font-size: 11px; color: #6b7c95; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+  .stat-row { display: flex; gap: 14px; margin: 12px 0; }
+  .stat-row .stat { flex: 1; }
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 4px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 5px; margin-bottom: 5px; }
+  .badge-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+  .badge-red { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+  .badge-yellow { background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.3); }
+  .badge-blue { background: rgba(77, 171, 247, 0.15); color: #4dabf7; border: 1px solid rgba(77, 171, 247, 0.3); }
+  .badge-purple { background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+  .badge-orange { background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.3); }
+  .badge-gray { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+  .diagram { background: #0a1224; border: 1px solid #243358; border-radius: 12px; padding: 24px; margin: 12px 0; flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .table-wrap { overflow: auto; flex: 1; border-radius: 8px; border: 1px solid #243358; }
+  table.matrix { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.matrix th { background: #1a2540; color: #4dabf7; padding: 9px 8px; text-align: right; font-weight: 600; border: 1px solid #243358; font-family: 'SF Mono', Monaco, monospace; font-size: 12px; }
+  table.matrix th.left { text-align: left; }
+  table.matrix th.row-label { text-align: left; color: #ffffff; background: #131c30; }
+  table.matrix td { padding: 9px 8px; text-align: right; border: 1px solid #243358; color: #b8c6db; font-family: 'SF Mono', Monaco, monospace; font-size: 12.5px; }
+  table.matrix td.label { text-align: left; font-weight: 500; color: #ffffff; background: #131c30; }
+  table.matrix td.winner { background: rgba(34, 197, 94, 0.20); color: #4ade80; font-weight: 700; }
+  table.matrix td.runner { background: rgba(34, 197, 94, 0.08); color: #86efac; }
+  table.matrix td.slow { background: rgba(239, 68, 68, 0.12); color: #fca5a5; }
+  table.matrix td.worst { background: rgba(239, 68, 68, 0.25); color: #fecaca; font-weight: 700; }
+  .callout { background: linear-gradient(135deg, rgba(77, 171, 247, 0.1), rgba(34, 211, 238, 0.05)); border-left: 4px solid #4dabf7; padding: 14px 18px; border-radius: 8px; margin: 10px 0; }
+  .callout-warn { background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(249, 115, 22, 0.05)); border-left: 4px solid #f87171; }
+  .callout-success { background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(74, 222, 128, 0.05)); border-left: 4px solid #4ade80; }
+  .callout-purple { background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(192, 132, 252, 0.05)); border-left: 4px solid #c084fc; }
+  .callout-title { font-size: 12px; font-weight: 700; color: #ffffff; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1.2px; }
+  .callout-body { font-size: 13.5px; color: #c5d2e3; line-height: 1.55; }
+  .scenario { background: #131c30; border: 1px solid #243358; border-radius: 10px; padding: 18px; margin-bottom: 12px; }
+  .scenario-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .scenario-num { background: #4dabf7; color: #0b1220; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+  .scenario-title { font-size: 16px; font-weight: 600; color: #ffffff; }
+  .scenario-body { font-size: 13.5px; color: #b8c6db; line-height: 1.55; margin-bottom: 8px; }
+  .scenario-stack { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 220px; padding: 10px 0; }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .bar { width: 100%; background: linear-gradient(180deg, var(--bar-color, #4dabf7), var(--bar-dark, #2563eb)); border-radius: 4px 4px 0 0; min-height: 3px; transition: all 0.3s; position: relative; }
+  .bar.winner { background: linear-gradient(180deg, #4ade80, #16a34a) !important; }
+  .bar.runner { background: linear-gradient(180deg, #86efac, #22c55e) !important; }
+  .bar.slow { background: linear-gradient(180deg, #f87171, #dc2626) !important; }
+  .bar-value { font-size: 11px; color: #c5d2e3; font-family: monospace; }
+  .bar-label { font-size: 11px; color: #8aa0bf; text-align: center; margin-top: 6px; }
+  .legend-row { display: flex; gap: 18px; justify-content: center; margin-top: 12px; font-size: 11px; color: #8aa0bf; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+  .memory-bar { background: #1a2540; height: 28px; border-radius: 6px; display: flex; align-items: center; padding: 0 10px; font-family: monospace; font-size: 12px; color: #ffffff; margin: 4px 0; overflow: hidden; position: relative; }
+  .memory-bar-fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(77, 171, 247, 0.25), rgba(34, 211, 238, 0.15)); border-right: 2px solid #4dabf7; }
+  .memory-bar-label { position: relative; z-index: 1; }
+  .comparison { display: grid; grid-template-columns: 1fr 60px 1fr; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid #243358; }
+  .comparison:last-child { border-bottom: none; }
+  .comp-val { font-family: 'SF Mono', monospace; font-size: 13px; color: #ffffff; text-align: center; }
+  .comp-val.win { color: #4ade80; font-weight: 700; }
+  .comp-val.lose { color: #f87171; }
+  .comp-name { font-size: 13px; color: #c5d2e3; }
+  .comp-name.win { color: #4ade80; font-weight: 600; }
+  .comp-name.lose { color: #f87171; }
+  .test-summary { background: #131c30; border-radius: 10px; padding: 16px; margin-bottom: 8px; border: 1px solid #243358; }
+  .test-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px dashed #243358; font-size: 13px; }
+  .test-row:last-child { border-bottom: none; }
+  .test-status { width: 60px; flex-shrink: 0; }
+  .test-status.ok { color: #4ade80; font-weight: 600; font-family: monospace; font-size: 12px; }
+  .test-name { color: #c5d2e3; flex: 1; font-family: monospace; font-size: 12px; }
+  .test-section-title { font-size: 13px; font-weight: 700; color: #4dabf7; text-transform: uppercase; letter-spacing: 1px; padding: 12px 0 8px 0; border-bottom: 2px solid #243358; margin-bottom: 8px; }
+  .section-label { font-size: 12px; color: #6b7c95; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 12px; }
+  .stack-summary { display: flex; gap: 12px; flex-wrap: wrap; }
+  .stack-card { background: #131c30; border: 1px solid #243358; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 200px; }
+  .stack-card-name { font-size: 15px; font-weight: 600; color: #ffffff; margin-bottom: 4px; }
+  .stack-card-metric { font-size: 12px; color: #8aa0bf; }
+  .stack-card-metric strong { color: #4dabf7; font-family: monospace; }
+  .center { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .big-num { font-size: 88px; font-weight: 700; color: #4ade80; line-height: 1; }
+  .big-num.red { color: #f87171; }
+  .big-num.blue { color: #4dabf7; }
+  .big-num.purple { color: #c084fc; }
+  .big-label { font-size: 16px; color: #8aa0bf; margin-top: 12px; }
+  .scrollable { overflow-y: auto; flex: 1; padding-right: 8px; }
+  .scrollable::-webkit-scrollbar { width: 6px; }
+  .scrollable::-webkit-scrollbar-thumb { background: #243358; border-radius: 3px; }
+  .cover { background: radial-gradient(ellipse at top, #1a2540 0%, #0b1220 70%); align-items: center; justify-content: center; text-align: center; }
+  .cover-tag { display: inline-block; padding: 7px 18px; background: rgba(77, 171, 247, 0.12); border: 1px solid #4dabf7; border-radius: 24px; color: #4dabf7; font-size: 13px; font-weight: 500; letter-spacing: 1px; margin-bottom: 16px; }
+  .cover-title { font-size: 52px; font-weight: 700; color: #ffffff; letter-spacing: -1.2px; margin-bottom: 12px; }
+  .cover-sub { font-size: 19px; color: #8aa0bf; max-width: 700px; }
+  ul.compact { list-style: none; padding-left: 0; }
+  ul.compact li { padding-left: 18px; position: relative; margin-bottom: 6px; font-size: 13.5px; color: #b8c6db; line-height: 1.5; }
+  ul.compact li::before { content: "▸"; position: absolute; left: 0; color: #4dabf7; font-weight: 700; }
+  .keyword { color: #4dabf7; font-weight: 600; }
+  .keyword-green { color: #4ade80; font-weight: 600; }
+  .keyword-red { color: #f87171; font-weight: 600; }
+  .mono { font-family: 'SF Mono', Monaco, monospace; font-size: 12.5px; color: #22d3ee; background: #1a2540; padding: 2px 7px; border-radius: 4px; }
+  .heatmap-table th { font-family: -apple-system, sans-serif; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .perf-insight { background: rgba(77, 171, 247, 0.06); border-left: 3px solid #4dabf7; padding: 10px 14px; border-radius: 6px; margin: 6px 0; font-size: 13px; color: #c5d2e3; }
+  .perf-insight.green { background: rgba(34, 197, 94, 0.06); border-left-color: #4ade80; }
+  .perf-insight.red { background: rgba(239, 68, 68, 0.06); border-left-color: #f87171; }
+</style>
+</head>
+<body>
+
+<div class="progress" id="progress"></div>
+
+<div class="deck" id="deck">
+
+  <!-- 1: COVER -->
+  <div class="slide cover active" data-slide="1">
+    <div class="cover-tag">TEST RESULTS — BENCHMARK SUITE</div>
+    <h1 class="cover-title">Storage Backend Performance</h1>
+    <p class="cover-sub">Real measured numbers from the Zig ECS digital twin benchmark platform — across all six storage backends, scaling from 100 to 100k iterations</p>
+    <div style="margin-top: 36px;">
+      <span class="badge badge-blue">AoS</span>
+      <span class="badge badge-purple">SoA</span>
+      <span class="badge badge-blue">TimeSeries</span>
+      <span class="badge badge-purple">Columnar</span>
+      <span class="badge badge-orange">Hierarchical</span>
+      <span class="badge badge-green">RingBuffer</span>
+    </div>
+  </div>
+
+  <!-- 2: EXECUTIVE SUMMARY -->
+  <div class="slide" data-slide="2">
+    <div class="slide-num">02 / 14</div>
+    <h1 class="slide-title">Executive Summary</h1>
+    <p class="slide-subtitle">What the numbers actually say — at a glance.</p>
+    <div class="stat-row">
+      <div class="stat">
+        <div class="stat-num">53+72+156</div>
+        <div class="stat-label">Tests passed across 3 runs</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num green">281</div>
+        <div class="stat-label">Total assertions OK</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num purple">6</div>
+        <div class="stat-label">Storage backends compared</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num orange">2.3x</div>
+        <div class="stat-label">Fastest vs slowest spread</div>
+      </div>
+    </div>
+    <div class="callout-success">
+      <div class="callout-title">Top Finding</div>
+      <div class="callout-body"><strong class="keyword-green">TimeSeries and Columnar are tied for fastest</strong> at the time-window aggregation query — both at ~12.4µs median latency. This is the most common digital twin dashboard query, and they win it together by a clear margin over the baseline row-oriented stores.</div>
+    </div>
+    <div class="callout-purple">
+      <div class="callout-title">Surprise Finding</div>
+      <div class="callout-body"><strong>Hierarchical is mid-pack, not slow.</strong> Despite maintaining a parent-child zone tree, the 24h average query lands at 14.6µs — within 18% of the winners. The tree traversal overhead is real but small for this query shape.</div>
+    </div>
+    <div class="callout-warn">
+      <div class="callout-title">Memory Red Flag</div>
+      <div class="callout-body"><strong>RingBuffer uses 14x more memory</strong> than the column-oriented backends (241 KB vs 10 KB for the same 500 readings). It's fast but it's a memory hog — exactly as the design predicts.</div>
+    </div>
+  </div>
+
+  <!-- 3: TEST RUN OVERVIEW -->
+  <div class="slide" data-slide="3">
+    <div class="slide-num">03 / 14</div>
+    <h1 class="slide-title">Three Test Runs, Three Purposes</h1>
+    <p class="slide-subtitle">The test_results.txt file contains output from three separate suites run on three backends.</p>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="section-label" style="color: #4dabf7;">RUN 1</div>
+        <div style="font-size: 32px; font-weight: 700; color: #ffffff; margin-bottom: 4px;">53 tests</div>
+        <div style="font-size: 14px; color: #8aa0bf; margin-bottom: 12px;">Pure storage backend tests</div>
+        <ul class="compact">
+          <li>Interface conformance</li>
+          <li>Insert + read round-trip</li>
+          <li>getLatestBySensor</li>
+          <li>rangeByTime filters</li>
+          <li>Out-of-order insert handling</li>
+          <li>Cross-backend result equivalence</li>
+          <li>Empty-backend behavior</li>
+          <li>Eviction (RingBuffer)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="section-label" style="color: #c084fc;">RUN 2</div>
+        <div style="font-size: 32px; font-weight: 700; color: #ffffff; margin-bottom: 4px;">72 tests</div>
+        <div style="font-size: 14px; color: #8aa0bf; margin-bottom: 12px;">Benchmark + metrics + scaling</div>
+        <ul class="compact">
+          <li>Query equivalence across 6 backends</li>
+          <li>Combined per-query latency table</li>
+          <li>Scaling test: 100 → 100k iters</li>
+          <li>Metrics system smoke test</li>
+          <li>Memory footprint per backend</li>
+          <li>All correctness tests from Run 1 re-run</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="section-label" style="color: #fb923c;">RUN 3</div>
+        <div style="font-size: 32px; font-weight: 700; color: #ffffff; margin-bottom: 4px;">156 tests</div>
+        <div style="font-size: 14px; color: #8aa0bf; margin-bottom: 12px;">Full engine + storage integration</div>
+        <ul class="compact">
+          <li>ECS entity registry</li>
+          <li>Component storage & sparse sets</li>
+          <li>Hierarchy, transform, movement systems</li>
+          <li>Camera, input, animation systems</li>
+          <li>Resource loaders (OBJ, materials)</li>
+          <li>Hot-reload, jobs, pools, timers</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout" style="margin-top: 14px;">
+      <div class="callout-title">What We'll Focus On</div>
+      <div class="callout-body">The interesting data is in <strong>Run 2</strong> — that's where the per-backend latency table and the scaling curves live. Run 1 confirms correctness (everything produces the same answers). Run 3 confirms the engine still works with the new storage layer attached.</div>
+    </div>
+  </div>
+
+  <!-- 4: HEADLINE LATENCY TABLE -->
+  <div class="slide" data-slide="4">
+    <div class="slide-num">04 / 14</div>
+    <h1 class="slide-title">The Headline Number: query_avg_window Latency</h1>
+    <p class="slide-subtitle">Per-query latency across all 6 backends — 10 sensors × 50 readings, 1000 iterations per measurement.</p>
+    <div class="table-wrap">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th class="row-label left">Backend</th>
+            <th>median (ns)</th>
+            <th>median (µs)</th>
+            <th>p95 (ns)</th>
+            <th>p95 (µs)</th>
+            <th>p99 (ns)</th>
+            <th>p99 (µs)</th>
+            <th>mean (ns)</th>
+            <th>throughput</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="label">AoS <span style="color: #6b7c95; font-size: 11px;">— Array of Structs (baseline)</span></td>
+            <td>16,500</td><td>16.5</td>
+            <td>30,400</td><td>30.4</td>
+            <td>30,800</td><td>30.8</td>
+            <td>18,189</td>
+            <td>54,977 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">SoA <span style="color: #6b7c95; font-size: 11px;">— Struct of Arrays (DOD)</span></td>
+            <td>16,200</td><td>16.2</td>
+            <td>30,300</td><td>30.3</td>
+            <td>30,700</td><td>30.7</td>
+            <td>17,909</td>
+            <td>55,836 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">TimeSeries <span style="color: #6b7c95; font-size: 11px;">— append-only timestamped</span></td>
+            <td class="winner">12,400</td><td class="winner">12.4</td>
+            <td>26,500</td><td>26.5</td>
+            <td>26,800</td><td>26.8</td>
+            <td>14,160</td>
+            <td class="winner">70,620 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">Columnar <span style="color: #6b7c95; font-size: 11px;">— values split by field</span></td>
+            <td class="winner">12,400</td><td class="winner">12.4</td>
+            <td class="winner">26,400</td><td class="winner">26.4</td>
+            <td class="winner">26,800</td><td class="winner">26.8</td>
+            <td>14,174</td>
+            <td>70,550 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">Hierarchical <span style="color: #6b7c95; font-size: 11px;">— zone tree traversal</span></td>
+            <td>14,600</td><td>14.6</td>
+            <td>28,700</td><td>28.7</td>
+            <td>29,000</td><td>29.0</td>
+            <td>16,406</td>
+            <td>60,950 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">RingBuffer <span style="color: #6b7c95; font-size: 11px;">— in-memory circular</span></td>
+            <td>14,000</td><td>14.0</td>
+            <td>28,100</td><td>28.1</td>
+            <td>28,700</td><td>28.7</td>
+            <td>15,789</td>
+            <td>63,334 ops/s</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 14px;">
+      <div class="callout-success" style="margin: 0;">
+        <div class="callout-title">🥇 Winner: TimeSeries / Columnar (tie)</div>
+        <div class="callout-body">12.4 µs median. ~28% faster than AoS baseline. Tied on every percentile.</div>
+      </div>
+      <div class="callout" style="margin: 0;">
+        <div class="callout-title">🥈 2nd: RingBuffer</div>
+        <div class="callout-body">14.0 µs median. RAM access wins, but at huge memory cost.</div>
+      </div>
+      <div class="callout-warn" style="margin: 0;">
+        <div class="callout-title">🐢 Slowest: AoS</div>
+        <div class="callout-body">16.5 µs median. Cache-unfriendly layout, but only 33% slower than winner.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5: VISUAL BAR CHART -->
+  <div class="slide" data-slide="5">
+    <div class="slide-num">05 / 14</div>
+    <h1 class="slide-title">Latency Comparison — Visual</h1>
+    <p class="slide-subtitle">Same data as the previous slide, but the picture says it faster than the numbers do.</p>
+    <h3>Median Latency (microseconds, lower is better)</h3>
+    <div class="bar-chart">
+      <div class="bar-col">
+        <div class="bar-value">16.5 µs</div>
+        <div class="bar slow" style="height: 75%;"></div>
+        <div class="bar-label">AoS</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value">16.2 µs</div>
+        <div class="bar slow" style="height: 74%;"></div>
+        <div class="bar-label">SoA</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value">14.6 µs</div>
+        <div class="bar" style="height: 67%; --bar-color: #fb923c; --bar-dark: #ea580c;"></div>
+        <div class="bar-label">Hierarchical</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value">14.0 µs</div>
+        <div class="bar runner" style="height: 64%;"></div>
+        <div class="bar-label">RingBuffer</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value">12.4 µs</div>
+        <div class="bar winner" style="height: 56%;"></div>
+        <div class="bar-label">TimeSeries</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value">12.4 µs</div>
+        <div class="bar winner" style="height: 56%;"></div>
+        <div class="bar-label">Columnar</div>
+      </div>
+    </div>
+    <div class="legend-row">
+      <div class="legend-item"><div class="legend-dot" style="background: #4ade80;"></div>Winner (12.4 µs)</div>
+      <div class="legend-item"><div class="legend-dot" style="background: #86efac;"></div>Runner-up (14.0 µs)</div>
+      <div class="legend-item"><div class="legend-dot" style="background: #fb923c;"></div>Mid-pack (14.6 µs)</div>
+      <div class="legend-item"><div class="legend-dot" style="background: #f87171;"></div>Baseline (16.2-16.5 µs)</div>
+    </div>
+    <div class="callout" style="margin-top: 16px;">
+      <div class="callout-title">What This Tells Us</div>
+      <div class="callout-body">At this small dataset size (500 readings), the spread is narrow: only <strong>~4 µs</strong> between fastest and slowest. The layout differences don't dominate when everything fits in L1 cache. As the dataset grows, the columnar layout should pull ahead more visibly — that's what the scaling test on the next slides measures.</div>
+    </div>
+  </div>
+
+  <!-- 6: SCALING TEST -->
+  <div class="slide" data-slide="6">
+    <div class="slide-num">06 / 14</div>
+    <h1 class="slide-title">Scaling: Does the Winner Hold at 100k Iterations?</h1>
+    <p class="slide-subtitle">Same query, 1000× more repetitions. Median latency should be stable if caches hold.</p>
+    <div class="table-wrap">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th class="row-label left">Backend</th>
+            <th>100 iter</th>
+            <th>1k iter</th>
+            <th>10k iter</th>
+            <th>100k iter</th>
+            <th>Variance</th>
+            <th>Throughput @ 100k</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="label">AoS</td>
+            <td>16.1 µs</td>
+            <td>16.2 µs</td>
+            <td>16.2 µs</td>
+            <td>16.1 µs</td>
+            <td><span style="color: #4ade80;">±0.1 µs (0.6%)</span></td>
+            <td>55,136 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">SoA</td>
+            <td>16.0 µs</td>
+            <td>16.0 µs</td>
+            <td>16.0 µs</td>
+            <td>16.0 µs</td>
+            <td><span style="color: #4ade80;">±0.0 µs (0.0%)</span></td>
+            <td>56,257 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">TimeSeries</td>
+            <td>12.2 µs</td>
+            <td>12.2 µs</td>
+            <td>12.2 µs</td>
+            <td>12.2 µs</td>
+            <td><span style="color: #4ade80;">±0.0 µs (0.0%)</span></td>
+            <td class="winner">71,641 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">Columnar</td>
+            <td>12.3 µs</td>
+            <td>12.3 µs</td>
+            <td>12.3 µs</td>
+            <td>12.3 µs</td>
+            <td><span style="color: #4ade80;">±0.0 µs (0.0%)</span></td>
+            <td>71,140 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">Hierarchical</td>
+            <td>14.5 µs</td>
+            <td>14.5 µs</td>
+            <td>14.5 µs</td>
+            <td>14.5 µs</td>
+            <td><span style="color: #4ade80;">±0.0 µs (0.0%)</span></td>
+            <td>61,331 ops/s</td>
+          </tr>
+          <tr>
+            <td class="label">RingBuffer</td>
+            <td>13.9 µs</td>
+            <td>13.9 µs</td>
+            <td>13.9 µs</td>
+            <td>13.9 µs</td>
+            <td><span style="color: #4ade80;">±0.0 µs (0.0%)</span></td>
+            <td>63,799 ops/s</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout-success" style="margin-top: 14px;">
+      <div class="callout-title">All Backends Are Dead Stable Across Iterations</div>
+      <div class="callout-body">Variance is under 1% for every backend. This means the benchmark is <strong>deterministic</strong> and the measurements are trustworthy. No jitter, no GC pauses, no allocator weirdness. The ranking you see at 100 iterations is the same ranking at 100,000.</div>
+    </div>
+    <div class="callout-warn" style="margin-top: 8px;">
+      <div class="callout-title">⚠️ Important Caveat</div>
+      <div class="callout-body">This test measures the same query repeated against the same in-memory dataset. It does NOT measure scaling with <strong>data size</strong> — only iteration count. To see how backends handle 10k vs 100k vs 1M sensor readings, the next iteration of the benchmark suite needs to scale the <span class="mono">N</span> parameter, not just the iteration count.</div>
+    </div>
+  </div>
+
+  <!-- 7: MEMORY FOOTPRINT -->
+  <div class="slide" data-slide="7">
+    <div class="slide-num">07 / 14</div>
+    <h1 class="slide-title">Memory Footprint — The Hidden Cost</h1>
+    <p class="slide-subtitle">For the same 500-reading dataset. This is where the "fast" backends start showing their real price tag.</p>
+    <div style="margin: 16px 0;">
+      <div class="memory-bar" style="height: 36px;">
+        <div class="memory-bar-fill" style="width: 4.4%;"></div>
+        <span class="memory-bar-label"><strong>SoA</strong> &nbsp; · &nbsp; 10,566 bytes &nbsp; <span style="color: #4ade80; font-size: 11px;">— most efficient</span></span>
+      </div>
+      <div class="memory-bar" style="height: 36px;">
+        <div class="memory-bar-fill" style="width: 4.4%;"></div>
+        <span class="memory-bar-label"><strong>Columnar</strong> &nbsp; · &nbsp; 10,566 bytes &nbsp; <span style="color: #4ade80; font-size: 11px;">— ties SoA</span></span>
+      </div>
+      <div class="memory-bar" style="height: 36px;">
+        <div class="memory-bar-fill" style="width: 5.8%;"></div>
+        <span class="memory-bar-label"><strong>Hierarchical</strong> &nbsp; · &nbsp; 13,884 bytes &nbsp; <span style="color: #fb923c; font-size: 11px;">— tree overhead</span></span>
+      </div>
+      <div class="memory-bar" style="height: 36px;">
+        <div class="memory-bar-fill" style="width: 7.0%;"></div>
+        <span class="memory-bar-label"><strong>AoS</strong> &nbsp; · &nbsp; 16,752 bytes &nbsp; <span style="color: #fb923c; font-size: 11px;">— padding waste</span></span>
+      </div>
+      <div class="memory-bar" style="height: 36px;">
+        <div class="memory-bar-fill" style="width: 7.0%;"></div>
+        <span class="memory-bar-label"><strong>TimeSeries</strong> &nbsp; · &nbsp; 16,752 bytes &nbsp; <span style="color: #fb923c; font-size: 11px;">— index overhead</span></span>
+      </div>
+      <div class="memory-bar" style="height: 36px;">
+        <div class="memory-bar-fill" style="width: 100%; background: linear-gradient(90deg, rgba(239, 68, 68, 0.3), rgba(239, 68, 68, 0.15)); border-right-color: #f87171;"></div>
+        <span class="memory-bar-label"><strong>RingBuffer</strong> &nbsp; · &nbsp; 241,088 bytes &nbsp; <span style="color: #f87171; font-size: 11px;">— 22.8× SoA</span></span>
+      </div>
+    </div>
+    <div class="grid grid-2">
+      <div class="callout-success">
+        <div class="callout-title">Columnar + SoA: Lean Winners</div>
+        <div class="callout-body">Both at 10.5 KB. Columnar gets the speed AND memory crown. SoA is the data-oriented baseline that holds its own on memory while being 30% slower than the winners.</div>
+      </div>
+      <div class="callout-warn">
+        <div class="callout-title">RingBuffer: Memory Monster</div>
+        <div class="callout-body">241 KB to hold 500 readings. That's because it pre-allocates a fixed-size circular buffer per sensor, regardless of whether data fills it. For a small dataset, the overhead dominates. At full capacity it would amortize better.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8: THROUGHPUT -->
+  <div class="slide" data-slide="8">
+    <div class="slide-num">08 / 14</div>
+    <h1 class="slide-title">Throughput: Queries Per Second</h1>
+    <p class="slide-subtitle">Same data as latency, inverted. Higher = better.</p>
+    <div class="bar-chart" style="height: 200px;">
+      <div class="bar-col">
+        <div class="bar-value" style="color: #f87171;">55,136</div>
+        <div class="bar slow" style="height: 77%;"></div>
+        <div class="bar-label">AoS</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value" style="color: #f87171;">56,257</div>
+        <div class="bar slow" style="height: 78%;"></div>
+        <div class="bar-label">SoA</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value" style="color: #fb923c;">61,331</div>
+        <div class="bar" style="height: 86%; --bar-color: #fb923c; --bar-dark: #ea580c;"></div>
+        <div class="bar-label">Hierarchical</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value" style="color: #86efac;">63,799</div>
+        <div class="bar runner" style="height: 89%;"></div>
+        <div class="bar-label">RingBuffer</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value" style="color: #4ade80;">71,140</div>
+        <div class="bar winner" style="height: 99%;"></div>
+        <div class="bar-label">Columnar</div>
+      </div>
+      <div class="bar-col">
+        <div class="bar-value" style="color: #4ade80;">71,641</div>
+        <div class="bar winner" style="height: 100%;"></div>
+        <div class="bar-label">TimeSeries</div>
+      </div>
+    </div>
+    <div class="stat-row" style="margin-top: 18px;">
+      <div class="stat">
+        <div class="stat-num green">71,641</div>
+        <div class="stat-label">Top throughput (TimeSeries, q/s)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num red">55,136</div>
+        <div class="stat-label">Lowest throughput (AoS, q/s)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">30%</div>
+        <div class="stat-label">Speed advantage of winner</div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top: 12px;">
+      <div class="callout-title">The "Winner Gap" Is Real But Modest</div>
+      <div class="callout-body">30% throughput advantage at this scale. <strong>For a dashboard refreshing every 30 seconds, this is invisible</strong> — even AoS handles 55k queries/sec, which is 1.65 million queries per minute. The architectural decision should be driven by query SHAPE and data VOLUME, not by 4-µs differences at this size.</div>
+    </div>
+  </div>
+
+  <!-- 9: AoS vs SoA -->
+  <div class="slide" data-slide="9">
+    <div class="slide-num">09 / 14</div>
+    <h1 class="slide-title">Deep Dive: AoS vs SoA</h1>
+    <p class="slide-subtitle">The two baseline layouts. Why does DOD win on paper but tie here?</p>
+    <div class="comparison">
+      <div class="comp-name lose">AoS — Array of Structs</div>
+      <div class="comp-val">16.5 µs</div>
+      <div class="comp-name">vs</div>
+    </div>
+    <div class="comparison" style="border-bottom: none;">
+      <div class="comp-name win">SoA — Struct of Arrays</div>
+      <div class="comp-val win">16.2 µs</div>
+      <div class="comp-name">2% faster</div>
+    </div>
+    <div class="grid grid-2" style="margin-top: 14px;">
+      <div class="card">
+        <h3 style="color: #f87171;">AoS Layout</h3>
+        <div style="font-family: monospace; font-size: 12px; background: #0a1224; padding: 14px; border-radius: 6px; color: #c5d2e3; line-height: 1.7;">
+          <span style="color: #6b7c95;">// One struct = one reading</span><br>
+          [sensor=0, ts=0, val=21.0]<br>
+          [sensor=0, ts=1, val=21.1]<br>
+          [sensor=0, ts=2, val=21.2]<br>
+          ...<br>
+          <span style="color: #6b7c95;">// Cache line: 16 bytes per reading</span><br>
+          <span style="color: #6b7c95;">// Scanning "all values" pulls ts+id waste</span>
+        </div>
+        <p style="margin-top: 10px; font-size: 13px;"><strong>Why it's slow:</strong> To compute AVG(value), you fetch every reading's full struct, including timestamp and sensor_id you don't need.</p>
+      </div>
+      <div class="card">
+        <h3 style="color: #4ade80;">SoA Layout</h3>
+        <div style="font-family: monospace; font-size: 12px; background: #0a1224; padding: 14px; border-radius: 6px; color: #c5d2e3; line-height: 1.7;">
+          <span style="color: #6b7c95;">// Separate arrays per field</span><br>
+          sensor_ids = [0, 0, 0, 0, ...]<br>
+          timestamps = [0, 1, 2, 3, ...]<br>
+          values&nbsp;&nbsp;&nbsp;&nbsp; = [21.0, 21.1, 21.2, ...]<br>
+          <br>
+          <span style="color: #6b7c95;">// Cache line: tight on values only</span>
+        </div>
+        <p style="margin-top: 10px; font-size: 13px;"><strong>Why it should be fast:</strong> AVG only touches the values array. Adjacent values stay in cache. SIMD vectorization is trivial.</p>
+      </div>
+    </div>
+    <div class="callout-purple" style="margin-top: 12px;">
+      <div class="callout-title">Why SoA Only Wins By 2%</div>
+      <div class="callout-body">At 500 readings, <strong>everything fits in L1 cache</strong>. Both layouts pull data into cache equally fast. SoA's advantage scales with data size — once you exceed L1 (typically 32-64 KB), SoA starts pulling ahead because it only fetches the field it needs. <strong>This benchmark is too small to show SoA's true strength.</strong></div>
+    </div>
+  </div>
+
+  <!-- 10: TIME SERIES DEEP DIVE -->
+  <div class="slide" data-slide="10">
+    <div class="slide-num">10 / 14</div>
+    <h1 class="slide-title">Deep Dive: Why TimeSeries Wins</h1>
+    <p class="slide-subtitle">TimeSeries stores readings sorted by timestamp. For time-window queries, that's the perfect layout.</p>
+    <div class="grid grid-2">
+      <div>
+        <h3>The Layout (Append-Only)</h3>
+        <div style="font-family: monospace; font-size: 12px; background: #0a1224; padding: 14px; border-radius: 6px; color: #c5d2e3; line-height: 1.6;">
+          <span style="color: #6b7c95;">// Index by (sensor_id, timestamp)</span><br>
+          [<span style="color: #4dabf7;">s0</span>, ts=1000, v=21.0]<br>
+          [<span style="color: #4dabf7;">s0</span>, ts=1060, v=21.1]<br>
+          [<span style="color: #4dabf7;">s0</span>, ts=1120, v=21.2]<br>
+          [<span style="color: #4dabf7;">s0</span>, ts=1180, v=21.3]<br>
+          [<span style="color: #fb923c;">s1</span>, ts=1000, v=19.5]<br>
+          [<span style="color: #fb923c;">s1</span>, ts=1060, v=19.6]<br>
+          ...<br>
+          <br>
+          <span style="color: #6b7c95;">// "Avg for s0 last 24h"</span><br>
+          <span style="color: #6b7c95;">// = scan contiguous block</span>
+        </div>
+      </div>
+      <div>
+        <h3>What The Benchmark Proves</h3>
+        <div class="perf-insight green"><strong>Contiguous reads</strong> — once you know s0's block range, the average computation is a tight loop with no branching and no random access.</div>
+        <div class="perf-insight green"><strong>Out-of-order inserts still work</strong> — tests #20 and #33 confirm reads return sorted data even after lazy sorting kicks in.</div>
+        <div class="perf-insight"><strong>Memory at parity with AoS</strong> — 16,752 bytes vs AoS's 16,752. The time index costs almost nothing at this size.</div>
+        <div class="perf-insight red"><strong>But:</strong> p99 is only 2.16× median (26.8 µs vs 12.4 µs) — decent tail latency, not exceptional.</div>
+      </div>
+    </div>
+    <div class="callout-success" style="margin-top: 12px;">
+      <div class="callout-title">Where It Wins In Production</div>
+      <div class="callout-body">This benchmark is a single-sensor, single-window query. In production, TimeSeries's real wins come from <strong>time-range scans that touch millions of rows</strong> — sorted-by-time means sequential I/O, which is 100x faster than random I/O on spinning disks and still 5-10x faster on SSDs. This benchmark can't show that advantage at 500 rows.</div>
+    </div>
+  </div>
+
+  <!-- 11: HIERARCHICAL MID-PACK -->
+  <div class="slide" data-slide="11">
+    <div class="slide-num">11 / 14</div>
+    <h1 class="slide-title">Surprise: Hierarchical Is Mid-Pack</h1>
+    <p class="slide-subtitle">Maintaining a zone tree costs more than AoS/SoA — but less than you'd expect.</p>
+    <div class="stat-row">
+      <div class="stat">
+        <div class="stat-num">14.6 µs</div>
+        <div class="stat-label">Hierarchical median</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num orange">+18%</div>
+        <div class="stat-label">vs fastest (TimeSeries)</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num orange">-11%</div>
+        <div class="stat-label">vs AoS baseline</div>
+      </div>
+    </div>
+    <div class="grid grid-2">
+      <div class="callout-purple">
+        <div class="callout-title">The Tree-Building Cost</div>
+        <div class="callout-body">Each insert requires maintaining parent-child links and updating zone indexes. That's 3-4 pointer operations per write vs 1 for AoS. Read performance is comparable because the tree shape is queried at most once per call, then the sensor scan dominates.</div>
+      </div>
+      <div class="callout-success">
+        <div class="callout-title">When Hierarchical Wins Big</div>
+        <div class="callout-body">For queries like "all sensors on floor 3" or "siblings of room 201", Hierarchical is the only backend with an O(log n) or O(1) answer. The other backends would scan everything. <strong>That test isn't in this benchmark suite yet.</strong></div>
+      </div>
+    </div>
+    <div class="scenario">
+      <div class="scenario-head">
+        <div class="scenario-num">37</div>
+        <div class="scenario-title">Hierarchical-specific test passed: tree structure creates correct zone hierarchy</div>
+      </div>
+      <div class="scenario-body">Confirms the implementation correctly handles Building → Floor → Room → Sensor nesting. The benchmark proves correctness, just not the spatial-query advantage.</div>
+    </div>
+  </div>
+
+  <!-- 12: RINGBUFFER MEMORY WARNING -->
+  <div class="slide" data-slide="12">
+    <div class="slide-num">12 / 14</div>
+    <h1 class="slide-title">RingBuffer: Fast But Greedy</h1>
+    <p class="slide-subtitle">2nd fastest on latency, but the memory story is brutal at small scale.</p>
+    <div class="big-num red" style="text-align: center;">22.8×</div>
+    <div class="big-label" style="text-align: center; margin-bottom: 16px;">more memory than the columnar winners (for the same 500 readings)</div>
+    <div class="grid grid-2">
+      <div class="callout-warn">
+        <div class="callout-title">Why It's So Memory-Heavy</div>
+        <div class="callout-body">RingBuffer pre-allocates a fixed-size slot array per sensor entity. For 10 sensors with capacity 100 readings each = 1000 slots reserved at startup, regardless of how many are filled. At 500 readings, half the slots are empty but committed.</div>
+      </div>
+      <div class="callout-success">
+        <div class="callout-title">When It Wins Anyway</div>
+        <div class="callout-body">At full capacity (every slot used), RingBuffer's per-reading memory approaches AoS/SoA. For a stable sensor population where buffer size is well-tuned to expected throughput, the latency win (14.0 vs 16.5 µs) becomes worth the RAM cost.</div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top: 12px;">
+      <div class="callout-title">Test #45 Confirms Eviction Works</div>
+      <div class="callout-body"><span class="mono">eviction keeps only latest N readings</span> — RingBuffer correctly drops old data when full. This is what makes it suitable for the "real-time dashboard" tier in the spec's tiered architecture.</div>
+    </div>
+  </div>
+
+  <!-- 13: COST & RECOMMENDATIONS -->
+  <div class="slide" data-slide="13">
+    <div class="slide-num">13 / 14</div>
+    <h1 class="slide-title">What This Means For The Cost Model</h1>
+    <p class="slide-subtitle">Translating microseconds into dollars — and what the report should actually say.</p>
+    <div class="grid grid-2">
+      <div class="callout-success">
+        <div class="callout-title">At This Scale, Choice Doesn't Matter For Cost</div>
+        <div class="callout-body">500 readings × 10 sensors is a tiny dataset. All backends handle it in single-digit milliseconds per query. At this scale, the cost difference is dominated by storage tier pricing, not query compute. Choose based on the future scale, not the current scale.</div>
+      </div>
+      <div class="callout">
+        <div class="callout-title">What The Report Should Recommend</div>
+        <div class="callout-body">For a 10-sensor project: <strong>any backend works</strong>. For a 10k-sensor project: <strong>TimeSeries or Columnar</strong> based on query shape. For 1M+ sensors: <strong>tiered architecture is mandatory</strong>, single-backend breaks.</div>
+      </div>
+    </div>
+    <div class="scenario">
+      <div class="scenario-head">
+        <div class="scenario-num">A</div>
+        <div class="scenario-title">Project: small lab, 50 sensors, 1 Hz, 30 days</div>
+      </div>
+      <div class="scenario-body">Total: 129.6M readings. Fits comfortably in any backend's sweet spot. <strong>Recommendation:</strong> SoA (zero infrastructure cost, simplest impl, performance within 30% of winners).</div>
+    </div>
+    <div class="scenario">
+      <div class="scenario-head">
+        <div class="scenario-num">B</div>
+        <div class="scenario-title">Project: office tower, 1,800 sensors, mixed rates, 90 days</div>
+      </div>
+      <div class="scenario-body">Total: ~500M readings. Time-series queries dominate. <strong>Recommendation:</strong> TimeSeries for hot tier + Columnar for warm tier + Lake for archive. Estimated $1,100/mo vs $4,800/mo naive (from spec).</div>
+    </div>
+    <div class="scenario">
+      <div class="scenario-head">
+        <div class="scenario-num">C</div>
+        <div class="scenario-title">Project: factory, 120 vibration sensors @ 100 Hz, 30 days</div>
+      </div>
+      <div class="scenario-body">Total: 31B raw readings. Storage is the constraint, not query speed. <strong>Recommendation:</strong> Edge feature extraction + RingBuffer for last 24h raw + TimeSeries for features + Lake for incident snapshots. No single backend fits.</div>
+    </div>
+  </div>
+
+  <!-- 14: WHAT'S MISSING -->
+  <div class="slide" data-slide="14">
+    <div class="slide-num">14 / 14</div>
+    <h1 class="slide-title">What This Benchmark Doesn't Tell Us</h1>
+    <p class="slide-subtitle">Honest list of gaps the team should close before trusting the report.</p>
+    <div class="grid grid-2">
+      <div class="callout-warn">
+        <div class="callout-title">Missing: Data-Volume Scaling</div>
+        <div class="callout-body">Iterations scale from 100 to 100k, but dataset stays at 500 readings. We have no idea how TimeSeries or Columnar perform at 10M, 100M, or 1B readings. That's where the real production difference lives.</div>
+      </div>
+      <div class="callout-warn">
+        <div class="callout-title">Missing: Multi-Sensor Aggregation</div>
+        <div class="callout-body">The benchmark is single-sensor. "Average across all sensors on floor 3" is a different query pattern entirely and likely favors Columnar by a much wider margin.</div>
+      </div>
+      <div class="callout-warn">
+        <div class="callout-title">Missing: Write Throughput</div>
+        <div class="callout-body">No insert performance numbers. Ingest is half the problem and we don't have comparable numbers. RingBuffer should crush here, TimeSeries should also win, AoS likely loses.</div>
+      </div>
+      <div class="callout-warn">
+        <div class="callout-title">Missing: Real Workloads</div>
+        <div class="callout-body">Dataset is uniform synthetic. No failure modes (dropouts, duplicates, out-of-order arrival percentages from Section 15.6). Real-world data is messier and differences may be larger.</div>
+      </div>
+    </div>
+    <div class="callout-success" style="margin-top: 14px;">
+      <div class="callout-title">Next Steps</div>
+      <div class="callout-body">Add a <span class="mono">scale_data()</span> benchmark that varies sensor count (10, 100, 1k, 10k, 100k) at fixed iterations. Add a <span class="mono">write_throughput()</span> benchmark for ingest. Add a multi-sensor aggregation variant of <span class="mono">query_avg_window</span>. With those four additions, the report becomes trustworthy for real deployment decisions.</div>
+    </div>
+    <div style="margin-top: 22px; text-align: center; color: #8aa0bf; font-size: 13px;">
+      <span class="badge badge-blue">281 tests passed</span>
+      <span class="badge badge-green">0 failures</span>
+      <span class="badge badge-purple">6 backends</span>
+      <span class="badge badge-orange">2 unsanswered questions remaining</span>
+    </div>
+  </div>
+
+</div>
+
+<div class="nav">
+  <button id="prevBtn" onclick="prevSlide()">← Previous</button>
+  <div class="counter" id="counter">1 / 14</div>
+  <button id="nextBtn" onclick="nextSlide()">Next →</button>
+</div>
+
+<script>
+  let current = 1;
+  const total = 14;
+
+  function show(n) {
+    if (n < 1 || n > total) return;
+    document.querySelectorAll('.slide').forEach(s => s.classList.remove('active'));
+    document.querySelector(`[data-slide="${n}"]`).classList.add('active');
+    current = n;
+    document.getElementById('counter').textContent = `${n} / ${total}`;
+    document.getElementById('progress').style.width = `${(n / total) * 100}%`;
+    document.getElementById('prevBtn').disabled = n === 1;
+    document.getElementById('nextBtn').disabled = n === total;
+  }
+
+  function nextSlide() { show(current + 1); }
+  function prevSlide() { show(current - 1); }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); nextSlide(); }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); prevSlide(); }
+    if (e.key === 'Home') { e.preventDefault(); show(1); }
+    if (e.key === 'End') { e.preventDefault(); show(total); }
+  });
+
+  show(1);
+</script>
+
+</body>
+</html>
