@@ -268,9 +268,20 @@ pub const SpawnedByComponent = struct {
 /// them; toggling auto_play back off and on again does NOT replay the clip
 /// (playing latches), since this is a "play once on spawn" flag, not a loop
 /// control — repeat playback is audio_device.clipPlay called explicitly.
+///
+/// `spatialized` and rolloff/min_distance/max_distance are read by
+/// Audio3DSystem (engine/ecs/systems/audio_3d_system.zig), not AudioSystem —
+/// non-spatialized sources (the common case for UI/2D sound effects) are
+/// explicitly told to ignore the listener position rather than just leaving
+/// position at the origin, since ma_sound_init_from_file enables
+/// spatialization by default.
 pub const AudioSourceComponent = struct {
     clip_id: u32 = 0,
     volume: f32 = 1.0,
     auto_play: bool = false,
     playing: bool = false,
+    spatialized: bool = false,
+    rolloff: f32 = 1.0,
+    min_distance: f32 = 1.0,
+    max_distance: f32 = std.math.floatMax(f32),
 };
