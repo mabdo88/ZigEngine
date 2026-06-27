@@ -21,9 +21,9 @@ pub fn update(registry: *Registry, _: *anyopaque, _: f32) anyerror!void {
     if (cam_it.next()) |cam_entity| {
         const camera = registry.get(components.CameraComponent, cam_entity).?;
         const dir = math.normalize(camera.target - camera.position);
-        ma.ma_engine_listener_set_position(&engine.engine, 0, camera.position[0], camera.position[1], camera.position[2]);
-        ma.ma_engine_listener_set_direction(&engine.engine, 0, dir[0], dir[1], dir[2]);
-        ma.ma_engine_listener_set_world_up(&engine.engine, 0, camera.up[0], camera.up[1], camera.up[2]);
+        ma.ma_engine_listener_set_position(&engine.engine, 0, mirrorX(camera.position[0]), camera.position[1], camera.position[2]);
+        ma.ma_engine_listener_set_direction(&engine.engine, 0, mirrorX(dir[0]), dir[1], dir[2]);
+        ma.ma_engine_listener_set_world_up(&engine.engine, 0, mirrorX(camera.up[0]), camera.up[1], camera.up[2]);
     }
 
     const clips = audio_shared.clip_cache orelse return;
@@ -41,11 +41,29 @@ pub fn update(registry: *Registry, _: *anyopaque, _: f32) anyerror!void {
 
         if (registry.get(components.FinalTransformComponent, entity)) |ft| {
             const m = ft.matrix;
-            ma.ma_sound_set_position(&clip.sound, m[3][0], m[3][1], m[3][2]);
+            ma.ma_sound_set_position(&clip.sound, mirrorX(m[3][0]), m[3][1], m[3][2]);
         } else if (registry.get(components.TransformComponent, entity)) |t| {
-            ma.ma_sound_set_position(&clip.sound, t.position[0], t.position[1], t.position[2]);
+            ma.ma_sound_set_position(&clip.sound, mirrorX(t.position[0]), t.position[1], t.position[2]);
         }
     }
+}
+
+/// miniaudio's spatializer pans a sound's *world-space* +X as the right
+/// channel (see g_maChannelDirections in miniaudio.h: FRONT_RIGHT is
+/// {+0.7071, 0, -0.7071}), which on real hardware was confirmed to come out
+/// mirrored against our renderer's own +X-is-screen-right convention (the
+/// same `cross(forward, up)` math camera_system.zig already uses for
+/// strafing) — verified by ear: a source placed at the engine's "RIGHT"
+/// position played from the left speaker. There's no public engine-level
+/// setter for `ma_spatializer_listener_config.handedness` (the field that
+/// exists for exactly this kind of convention mismatch) to flip this for us,
+/// so we negate every X coordinate handed to miniaudio ourselves instead —
+/// equivalent to setting that handedness flag, just done at the call site.
+/// Every vector we pass in (listener position, direction, world up, and
+/// sound position) needs this for the math to stay internally consistent,
+/// not just the sound position.
+fn mirrorX(x: f32) f32 {
+    return -x;
 }
 
 pub fn create(ctx: *SystemCreateCtx) anyerror!*anyopaque {
@@ -88,7 +106,7 @@ test "Audio3DSystem positions the listener at the camera" {
 
     const ma = audio_device.ma;
     const pos = ma.ma_engine_listener_get_position(&engine.engine, 0);
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0), pos.x, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, -1.0), pos.x, 1e-5); // mirrored, see mirrorX's doc comment
     try std.testing.expectApproxEqAbs(@as(f32, 2.0), pos.y, 1e-5);
     try std.testing.expectApproxEqAbs(@as(f32, 3.0), pos.z, 1e-5);
 }
@@ -131,7 +149,7 @@ test "Audio3DSystem disables spatialization for non-spatialized sources and posi
     const spatial_clip = clips.get(spatial_clip_id).?;
     try std.testing.expect(ma.ma_sound_is_spatialization_enabled(&spatial_clip.sound) != 0);
     const pos = ma.ma_sound_get_position(&spatial_clip.sound);
-    try std.testing.expectApproxEqAbs(@as(f32, 5.0), pos.x, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, -5.0), pos.x, 1e-5); // mirrored, see mirrorX's doc comment
 
     const flat_clip = clips.get(flat_clip_id).?;
     try std.testing.expect(ma.ma_sound_is_spatialization_enabled(&flat_clip.sound) == 0);
