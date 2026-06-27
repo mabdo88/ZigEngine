@@ -65,6 +65,10 @@ pub const AudioClip = struct {
 /// path must be a valid path for the lifetime of this call only — miniaudio
 /// copies/opens the file synchronously here, it doesn't retain the pointer.
 ///
+/// `group` attaches the clip to a mix bus (see audio_mixer.zig's AudioMixer)
+/// instead of going straight to the engine's master endpoint — pass `null`
+/// for clips that don't need bus routing (tests, one-off sounds).
+///
 /// Takes `out: *AudioClip` and initializes in place rather than returning
 /// AudioClip by value — same reasoning as AudioEngine.init: attaching a
 /// sound to the engine's node graph (ma_sound_init_from_file does this
@@ -75,7 +79,7 @@ pub const AudioClip = struct {
 /// AudioClip's storage themselves before calling this, for the same reason —
 /// an ArrayList(AudioClip) would silently corrupt every previously-loaded
 /// clip's node-graph linkage the next time it grows and moves its elements.
-pub fn clipLoad(engine: *AudioEngine, path: [:0]const u8, out: *AudioClip) !void {
+pub fn clipLoad(engine: *AudioEngine, path: [:0]const u8, group: ?*ma.ma_sound_group, out: *AudioClip) !void {
     // Zeroed for the same reason as AudioEngine.engine above — ma_sound also
     // embeds node-graph state that needs pre-zeroed memory.
     out.sound = std.mem.zeroes(ma.ma_sound);
@@ -83,7 +87,7 @@ pub fn clipLoad(engine: *AudioEngine, path: [:0]const u8, out: *AudioClip) !void
     // than going through the resource manager's streaming path — miniaudio's
     // own documented recommendation for short SFX like ours, instead of
     // paying streaming overhead for clips that are tiny anyway.
-    const result = ma.ma_sound_init_from_file(&engine.engine, path.ptr, ma.MA_SOUND_FLAG_DECODE, null, null, &out.sound);
+    const result = ma.ma_sound_init_from_file(&engine.engine, path.ptr, ma.MA_SOUND_FLAG_DECODE, group, null, &out.sound);
     if (result != ma.MA_SUCCESS) return error.AudioClipLoadFailed;
 }
 

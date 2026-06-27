@@ -6,7 +6,9 @@
 //! @import("miniaudioimport") must stay off that import chain.
 const audio_device = @import("audio_device.zig");
 const audio_cache = @import("audio_cache.zig");
+const audio_mixer = @import("audio_mixer.zig");
 
 /// Owned by audio_system.zig (create/destroy).
 pub var engine: ?*audio_device.AudioEngine = null;
 pub var clip_cache: ?*audio_cache.AudioClipCache = null;
+pub var mixer: ?*audio_mixer.AudioMixer = null;

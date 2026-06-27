@@ -94,6 +94,10 @@ pub fn loadFromIni(io: Io, allocator: std.mem.Allocator, path: []const u8, base:
     config.window_height = ini.getInt(u16, "window", "height", config.window_height);
     config.vsync = ini.getBool("window", "vsync", config.vsync);
     config.enable_validation = ini.getBool("engine", "enable_validation", config.enable_validation);
+    config.audio.master_volume = ini.getFloat(f32, "audio", "master_volume", config.audio.master_volume);
+    config.audio.ui_volume = ini.getFloat(f32, "audio", "ui_volume", config.audio.ui_volume);
+    config.audio.sfx_volume = ini.getFloat(f32, "audio", "sfx_volume", config.audio.sfx_volume);
+    config.audio.music_volume = ini.getFloat(f32, "audio", "music_volume", config.audio.music_volume);
     return config;
 }
 
@@ -170,6 +174,27 @@ test "loadFromIni overlays only the fields present in the file" {
 
     try std.testing.expectEqual(@as(u16, 1920), loaded.window_width);
     try std.testing.expectEqual(base.window_height, loaded.window_height); // untouched, keeps default
+}
+
+test "loadFromIni overlays audio bus volumes" {
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var rand_bytes: [8]u8 = undefined;
+    Io.random(io, &rand_bytes);
+    const n = std.mem.readInt(u64, &rand_bytes, .little);
+    var buf: [64]u8 = undefined;
+    const path = std.fmt.bufPrint(&buf, "ini_test_tmp_{x}.ini", .{n}) catch unreachable;
+    try fs.writeFile(io, path, "[audio]\nmaster_volume = 0.8\nui_volume = 0.5\n");
+    defer Io.Dir.cwd().deleteFile(io, path) catch {};
+
+    const base = config_mod.Config{};
+    const loaded = try loadFromIni(io, std.testing.allocator, path, base);
+
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8), loaded.audio.master_volume, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), loaded.audio.ui_volume, 1e-6);
+    try std.testing.expectApproxEqAbs(base.audio.sfx_volume, loaded.audio.sfx_volume, 1e-6); // untouched
 }
 
 test "loadFromIni returns base config unchanged when the file does not exist" {

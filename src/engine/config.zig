@@ -12,6 +12,7 @@ pub const Config = struct {
 
     camera: CameraConfig = .{},
     lighting: LightingConfig = .{},
+    audio: AudioConfig = .{},
     scenes: []const SceneConfig = &.{},
 
     pub const CameraConfig = struct {
@@ -31,6 +32,13 @@ pub const Config = struct {
         shadow_distance: f32 = 40.0,
         shadow_near: f32 = 0.5,
         shadow_far: f32 = 100.0,
+    };
+
+    pub const AudioConfig = struct {
+        master_volume: f32 = 1.0,
+        ui_volume: f32 = 1.0,
+        sfx_volume: f32 = 1.0,
+        music_volume: f32 = 1.0,
     };
 
     pub const SceneConfig = struct {

@@ -30,6 +30,7 @@ comptime {
     _ = @import("scene/scene_load.zig");
     _ = @import("scene/spawner.zig");
     _ = @import("audio/audio_device.zig");
+    _ = @import("audio/audio_mixer.zig");
     _ = @import("engine/ecs/systems/audio_system.zig");
     _ = @import("engine/ecs/systems/audio_3d_system.zig");
 }

@@ -132,8 +132,8 @@ test "Audio3DSystem disables spatialization for non-spatialized sources and posi
     // underlying ma_sound, which can't simultaneously be both spatialized
     // and not) — registered from different files so the cache doesn't dedup
     // them to the same id.
-    const spatial_clip_id = try clips.register(&engine, "assets/audio/test.wav");
-    const flat_clip_id = try clips.register(&engine, "assets/audio/ultrakill-glassbreak.mp3");
+    const spatial_clip_id = try clips.register(&engine, "assets/audio/test.wav", null);
+    const flat_clip_id = try clips.register(&engine, "assets/audio/ultrakill-glassbreak.mp3", null);
 
     const spatial_e = try reg.create();
     try reg.add(spatial_e, components.AudioSourceComponent{ .clip_id = spatial_clip_id, .spatialized = true });

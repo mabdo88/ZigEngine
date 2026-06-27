@@ -29,7 +29,15 @@ pub const AudioClipCache = struct {
         self.path_to_id.deinit();
     }
 
-    pub fn register(self: *AudioClipCache, engine: *audio_device.AudioEngine, path: []const u8) !u32 {
+    /// `group` routes the clip to a mix bus (see audio_mixer.zig's
+    /// AudioMixer.group) instead of the engine's master endpoint directly —
+    /// pass `null` for clips that don't need bus routing. Only applies the
+    /// first time a given path is registered: since clips are deduped by
+    /// path, a second `register()` call for an already-loaded path returns
+    /// the existing id (and its existing bus) regardless of what `group` is
+    /// passed this time — see audio_3d_system.zig's CLAUDE.md note on the
+    /// same one-clip-one-instance limitation for spatialization.
+    pub fn register(self: *AudioClipCache, engine: *audio_device.AudioEngine, path: []const u8, group: ?*audio_device.ma.ma_sound_group) !u32 {
         if (self.path_to_id.get(path)) |id| return id;
 
         const path_z = try self.allocator.allocSentinel(u8, path.len, 0);
@@ -38,7 +46,7 @@ pub const AudioClipCache = struct {
 
         const clip = try self.allocator.create(audio_device.AudioClip);
         errdefer self.allocator.destroy(clip);
-        try audio_device.clipLoad(engine, path_z, clip);
+        try audio_device.clipLoad(engine, path_z, group, clip);
         errdefer audio_device.clipUnload(clip);
 
         const id: u32 = @intCast(self.clips.items.len);

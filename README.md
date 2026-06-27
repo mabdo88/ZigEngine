@@ -291,7 +291,7 @@ zig build -Dvulkan-sdk=/path/to/VulkanSDK/1.4.341.1
 
 ## Roadmap
 
-Milestones M0–M6 (foundation, ECS, assets, renderer, animation, physics, scene/prefabs/spawning) are complete, plus M7's Audio Device and 3D Audio tasks. See `CLAUDE.md` for the full per-task breakdown.
+Milestones M0–M7 (foundation, ECS, assets, renderer, animation, physics, scene/prefabs/spawning, audio) are complete. See `CLAUDE.md` for the full per-task breakdown.
 
 - [x] ~~Scene/asset management and a proper update loop with delta time~~
 - [x] ~~Input system~~
@@ -311,7 +311,7 @@ Milestones M0–M6 (foundation, ECS, assets, renderer, animation, physics, scene
 - [x] ~~Scene (M6) — prefabs, spawner, scene save/load~~
 - [x] ~~Audio Device (M7) — miniaudio engine, clips, AudioSource component~~
 - [x] ~~3D Audio (M7) — listener tracking, spatialized AudioSourceComponent~~
-- [ ] Audio Mixer (M7) — bus volume groups, AudioSettings persisted to strife.ini
+- [x] ~~Audio Mixer (M7) — bus volume groups, AudioSettings persisted to strife.ini~~
 - [ ] UI (M8)
 - [ ] Gameplay-ready systems: health, combat, abilities, inventory, AI, projectiles, save/load (M9)
 
