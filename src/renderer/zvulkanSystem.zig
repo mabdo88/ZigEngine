@@ -10,6 +10,7 @@ const pipeline = @import("pipeline.zig");
 const material = @import("material.zig");
 const shadow = @import("shadow.zig");
 const debug = @import("debug.zig");
+const ui_render = @import("ui_render.zig");
 const skinning = @import("skinning.zig");
 const event = @import("../engine/ecs/event.zig");
 const math = @import("../engine/math.zig");
@@ -29,7 +30,7 @@ fn startShaderWatcher(allocator: std.mem.Allocator) void {
 
     var watcher = hotreload.FileWatcher.init(allocator);
     var any_watched = false;
-    for ([_][]const u8{ "src/shaders/slang.spv", "src/shaders/shadow.spv", "src/shaders/debug.spv" }) |path| {
+    for ([_][]const u8{ "src/shaders/slang.spv", "src/shaders/shadow.spv", "src/shaders/debug.spv", "src/shaders/ui.spv" }) |path| {
         watcher.watch(io, path) catch |e| {
             log.warn(@src(), "hotreload: couldn't watch '{s}': {s}", .{ path, @errorName(e) });
             continue;
@@ -66,9 +67,11 @@ fn checkShaderHotReload() !void {
     zvkw.zvk.vkDestroyPipeline(zvkw.ctx.m_Device, zvkw.ctx.pipeline, null);
     zvkw.zvk.vkDestroyPipeline(zvkw.ctx.m_Device, zvkw.ctx.shadowPipeline, null);
     zvkw.zvk.vkDestroyPipeline(zvkw.ctx.m_Device, zvkw.ctx.debugPipeline, null);
+    zvkw.zvk.vkDestroyPipeline(zvkw.ctx.m_Device, zvkw.ctx.uiPipeline, null);
     try pipeline.createPipeline(&zvkw.ctx);
     try shadow.createShadowPipeline(&zvkw.ctx);
     try debug.createDebugPipeline(&zvkw.ctx);
+    try ui_render.createUIPipeline(&zvkw.ctx);
     log.info(@src(), "hotreload: recreated render pipelines", .{});
 }
 
@@ -209,6 +212,12 @@ pub fn init(zig_allocator: std.mem.Allocator, title: ?[:0]const u8, WWidth: u16,
     try debug.createDebugPipeline(&zvkw.ctx);
     errdefer debug.destroyDebugPipeline(&zvkw.ctx);
 
+    try ui_render.createUIResources(&zvkw.ctx, zig_allocator);
+    errdefer ui_render.destroyUIResources(&zvkw.ctx);
+
+    try ui_render.createUIPipeline(&zvkw.ctx);
+    errdefer ui_render.destroyUIPipeline(&zvkw.ctx);
+
     if (hot_reload_shaders) startShaderWatcher(zig_allocator);
 
     try reg.events.subscribe(.entity_destroyed, @ptrCast(render_system), rs.onEntityDestroyed);
@@ -221,6 +230,8 @@ pub fn deinit(reg: *rgstry.Registry, render_system: *rs) void {
         shader_watcher = null;
     }
     _ = zvkw.zvk.vkDeviceWaitIdle(zvkw.ctx.m_Device);
+    ui_render.destroyUIPipeline(&zvkw.ctx);
+    ui_render.destroyUIResources(&zvkw.ctx);
     debug.destroyDebugPipeline(&zvkw.ctx);
     debug.destroyDebugResources(&zvkw.ctx);
     shadow.destroyShadowPipeline(&zvkw.ctx);
@@ -465,6 +476,7 @@ pub fn render(matrices: math.CameraMatrices, light: math.SceneLight, reg: *rgstr
     zvkw.zvk.vkCmdBindPipeline(cb, zvkw.zvk.VK_PIPELINE_BIND_POINT_GRAPHICS, zvkw.ctx.pipeline);
     try render_system.update(reg, cb, dt);
     debug.draw(&zvkw.ctx, cb);
+    ui_render.draw(&zvkw.ctx, cb);
     zvkw.zvk.vkCmdEndRendering(cb);
 
     const barrierPresent = zvkw.zvk.VkImageMemoryBarrier2{
@@ -548,6 +560,14 @@ pub fn ddBox(min: @Vector(3, f32), max: @Vector(3, f32), color: @Vector(3, f32))
 
 pub fn ddSphere(center: @Vector(3, f32), radius: f32, segments: u32, color: @Vector(3, f32)) void {
     debug.sphere(center, radius, segments, color);
+}
+
+pub fn uiQuad(pos: @Vector(2, f32), size: @Vector(2, f32), uv_min: @Vector(2, f32), uv_max: @Vector(2, f32), color: @Vector(4, f32), texture_index: zvkw.TextureHandle) void {
+    ui_render.quad(pos, size, uv_min, uv_max, color, texture_index);
+}
+
+pub fn windowSize() struct { width: u32, height: u32 } {
+    return .{ .width = zvkw.ctx.swapChainExtent.width, .height = zvkw.ctx.swapChainExtent.height };
 }
 
 pub fn shouldClose() bool {

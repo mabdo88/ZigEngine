@@ -106,6 +106,18 @@ pub fn orthographicSymmetric(half_extent: f32, near: f32, far: f32) [4][4]f32 {
     };
 }
 
+/// Screen-space orthographic projection for UI: pixel (0,0) at the top-left,
+/// y increasing downward — already matches Vulkan's y-down NDC, so unlike
+/// perspective()/orthographicSymmetric() this does NOT flip Y.
+pub fn orthoUIScreen(width: f32, height: f32) [4][4]f32 {
+    return [4][4]f32{
+        .{ 2.0 / width, 0.0, 0.0, 0.0 },
+        .{ 0.0, 2.0 / height, 0.0, 0.0 },
+        .{ 0.0, 0.0, 1.0, 0.0 },
+        .{ -1.0, -1.0, 0.0, 1.0 },
+    };
+}
+
 pub fn normalize(v: @Vector(3, f32)) @Vector(3, f32) {
     return v / @as(@Vector(3, f32), @splat(@sqrt(@reduce(.Add, v * v))));
 }

@@ -225,10 +225,12 @@ pub fn createDescriptorSetLayout(ctx: *zvkw.VulkanContext) !void {
 }
 
 pub fn createDescriptorPool(ctx: *zvkw.VulkanContext) !void {
+    // Uniform-buffer count covers the main pass's per-frame FrameUBO sets
+    // plus the UI pass's per-frame orthographic-projection UBO sets.
     const poolSize = [3]zvkw.zvk.VkDescriptorPoolSize{
         .{
             .type = zvkw.zvk.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .descriptorCount = zvkw.max_frames_in_flight,
+            .descriptorCount = zvkw.max_frames_in_flight * 2,
         },
         .{
             .type = zvkw.zvk.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -242,12 +244,43 @@ pub fn createDescriptorPool(ctx: *zvkw.VulkanContext) !void {
     const poolCI = zvkw.zvk.VkDescriptorPoolCreateInfo{
         .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .flags = zvkw.zvk.VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
-        .maxSets = zvkw.max_frames_in_flight + 1,
+        .maxSets = zvkw.max_frames_in_flight * 2 + 1,
         .poolSizeCount = 3,
         .pPoolSizes = &poolSize,
     };
     const result = zvkw.zvk.vkCreateDescriptorPool(ctx.m_Device, &poolCI, null, &ctx.descriptorPool);
     if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorPoolFailed;
+}
+
+pub fn createUIDescriptorSetLayout(ctx: *zvkw.VulkanContext) !void {
+    const binding = zvkw.zvk.VkDescriptorSetLayoutBinding{
+        .binding = 0,
+        .descriptorType = zvkw.zvk.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = zvkw.zvk.VK_SHADER_STAGE_VERTEX_BIT,
+    };
+    const layoutCI = zvkw.zvk.VkDescriptorSetLayoutCreateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &binding,
+    };
+    const result = zvkw.zvk.vkCreateDescriptorSetLayout(ctx.m_Device, &layoutCI, null, &ctx.uiProjDescriptorSetLayout);
+    if (result != zvkw.zvk.VK_SUCCESS) return error.CreateDescriptorSetLayoutFailed;
+}
+
+pub fn createUIDescriptorSets(ctx: *zvkw.VulkanContext) !void {
+    const layouts = [zvkw.max_frames_in_flight]zvkw.zvk.VkDescriptorSetLayout{
+        ctx.uiProjDescriptorSetLayout,
+        ctx.uiProjDescriptorSetLayout,
+    };
+    const allocInfo = zvkw.zvk.VkDescriptorSetAllocateInfo{
+        .sType = zvkw.zvk.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = ctx.descriptorPool,
+        .descriptorSetCount = zvkw.max_frames_in_flight,
+        .pSetLayouts = &layouts,
+    };
+    const result = zvkw.zvk.vkAllocateDescriptorSets(ctx.m_Device, &allocInfo, &ctx.uiProjDescriptorSets);
+    if (result != zvkw.zvk.VK_SUCCESS) return error.AllocateDescriptorSetsFailed;
 }
 
 pub fn writeShadowDescriptor(ctx: *zvkw.VulkanContext) void {

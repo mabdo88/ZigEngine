@@ -50,6 +50,13 @@ pub fn build(b: *std.Build) void {
     });
     stb_translate.addIncludePath(b.path("deps/stb/"));
 
+    const stbtt_translate = b.addTranslateC(.{
+        .root_source_file = b.path("deps/stb/stb_truetype.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    stbtt_translate.addIncludePath(b.path("deps/stb/"));
+
     const miniaudio_translate = b.addTranslateC(.{
         .root_source_file = b.path("deps/miniaudio/miniaudio.h"),
         .target = target,
@@ -67,6 +74,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
     exe.root_module.addCSourceFile(.{ .file = b.path("src/native/cgltf_impl.c") });
     exe.root_module.addCSourceFile(.{ .file = b.path("src/native/stb_image_impl.c") });
+    exe.root_module.addCSourceFile(.{ .file = b.path("src/native/stb_truetype_impl.c") });
     exe.root_module.addCSourceFile(.{ .file = b.path("src/native/miniaudio_impl.c") });
     exe.root_module.addIncludePath(b.path("deps/cgltf/"));
     exe.root_module.addIncludePath(b.path("deps/stb/"));
@@ -156,6 +164,7 @@ pub fn build(b: *std.Build) void {
         .{ .src = "src/shaders/shader.slang", .out = "src/shaders/slang.spv", .entries = &.{ "vertMain", "fragMain" } },
         .{ .src = "src/shaders/shadow.slang", .out = "src/shaders/shadow.spv", .entries = &.{"vertMain"} },
         .{ .src = "src/shaders/debug.slang", .out = "src/shaders/debug.spv", .entries = &.{ "vertMain", "fragMain" } },
+        .{ .src = "src/shaders/ui.slang", .out = "src/shaders/ui.spv", .entries = &.{ "vertMain", "fragMain" } },
     };
 
     const shaders_step = b.step("shaders", "Compile .slang shaders to .spv via slangc");
@@ -176,6 +185,11 @@ pub fn build(b: *std.Build) void {
     b.modules.put(b.allocator, "stbimport", stb_module) catch unreachable;
     mod.addImport("stbimport", stb_module);
     exe.root_module.addImport("stbimport", stb_module);
+
+    const stbtt_module = stbtt_translate.createModule();
+    b.modules.put(b.allocator, "stbttimport", stbtt_module) catch unreachable;
+    mod.addImport("stbttimport", stbtt_module);
+    exe.root_module.addImport("stbttimport", stbtt_module);
 
     const miniaudio_module = miniaudio_translate.createModule();
     b.modules.put(b.allocator, "miniaudioimport", miniaudio_module) catch unreachable;

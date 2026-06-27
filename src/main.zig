@@ -33,4 +33,9 @@ comptime {
     _ = @import("audio/audio_mixer.zig");
     _ = @import("engine/ecs/systems/audio_system.zig");
     _ = @import("engine/ecs/systems/audio_3d_system.zig");
+    _ = @import("ui/font.zig");
+    _ = @import("ui/text_renderer.zig");
+    _ = @import("ui/image_renderer.zig");
+    _ = @import("ui/button.zig");
+    _ = @import("ui/health_bar.zig");
 }

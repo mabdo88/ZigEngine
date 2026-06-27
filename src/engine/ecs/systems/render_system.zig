@@ -172,3 +172,19 @@ pub fn ddBox(min: @Vector(3, f32), max: @Vector(3, f32), color: @Vector(3, f32))
 pub fn ddSphere(center: @Vector(3, f32), radius: f32, segments: u32, color: @Vector(3, f32)) void {
     renderer.ddSphere(center, radius, segments, color);
 }
+
+pub fn uiQuad(pos: @Vector(2, f32), size: @Vector(2, f32), uv_min: @Vector(2, f32), uv_max: @Vector(2, f32), color: @Vector(4, f32), texture_index: u32) void {
+    renderer.uiQuad(pos, size, uv_min, uv_max, color, texture_index);
+}
+
+pub fn windowSize() struct { width: u32, height: u32 } {
+    return renderer.windowSize();
+}
+
+pub fn uploadTexture(pixels: []const u8, width: u32, height: u32) !u32 {
+    return renderer.uploadTexture(pixels, width, height);
+}
+
+pub fn windowPtr() *window.Window {
+    return renderer.windowPtr();
+}

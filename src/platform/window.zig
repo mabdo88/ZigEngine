@@ -20,6 +20,7 @@ pub const Key = struct {
 };
 
 pub const MouseButton = struct {
+    pub const left = c.GLFW_MOUSE_BUTTON_LEFT;
     pub const right = c.GLFW_MOUSE_BUTTON_RIGHT;
 };
 

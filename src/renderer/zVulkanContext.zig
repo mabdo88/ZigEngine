@@ -77,6 +77,15 @@ pub const DebugVertex = struct {
     pos: @Vector(3, f32),
     color: @Vector(3, f32),
 };
+pub const MAX_UI_VERTICES: u32 = 65536;
+pub const UIVertex = struct {
+    pos: @Vector(2, f32),
+    uv: @Vector(2, f32),
+    color: @Vector(4, f32),
+};
+pub const UIProjUBO = struct {
+    projection: [4][4]f32,
+};
 pub const TextureSlot = struct {
     image: zvk.VkImage = null,
     view: zvk.VkImageView = null,
@@ -156,6 +165,13 @@ pub const VulkanContext = struct {
     debugPipeline: zvk.VkPipeline = null,
     debugPipelineLayout: zvk.VkPipelineLayout = null,
     debugVertexBuffers: [max_frames_in_flight]ShaderDataBuffer = undefined,
+
+    uiPipeline: zvk.VkPipeline = null,
+    uiPipelineLayout: zvk.VkPipelineLayout = null,
+    uiProjDescriptorSetLayout: zvk.VkDescriptorSetLayout = null,
+    uiProjDescriptorSets: [max_frames_in_flight]zvk.VkDescriptorSet = undefined,
+    uiProjBuffers: [max_frames_in_flight]ShaderDataBuffer = undefined,
+    uiVertexBuffers: [max_frames_in_flight]ShaderDataBuffer = undefined,
 
     // Single buffer split into max_frames_in_flight regions of
     // SKIN_MATRICES_PER_FRAME mat4s each, rather than one buffer per frame —
