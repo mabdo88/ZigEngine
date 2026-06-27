@@ -236,4 +236,69 @@ pub fn build(b: *std.Build) void {
     const ecs_test_step = b.step("test-ecs", "Run ECS tests");
     ecs_test_step.dependOn(&ecs_test_cmd.step);
     test_step.dependOn(&ecs_test_cmd.step);
+
+    // Digital Twin platform (headless storage benchmarking — no Vulkan)
+    const dt_test_cmd = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "test",
+        "engine/ecs/storage/storage_backend.zig",
+        "-ODebug",
+        "--cache-dir",
+        ".zig-cache",
+    });
+    const dt_test_step = b.step("test-dt", "Run digital twin platform tests");
+    dt_test_step.dependOn(&dt_test_cmd.step);
+    test_step.dependOn(&dt_test_cmd.step);
+
+    // Digital Twin storage backends (AoS, SoA — headless, no Vulkan)
+    const dt_backends_test_cmd = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "test",
+        "engine/ecs/storage/backends_test.zig",
+        "-ODebug",
+        "--cache-dir",
+        ".zig-cache",
+    });
+    const dt_backends_test_step = b.step("test-dt-backends", "Run digital twin storage backend tests");
+    dt_backends_test_step.dependOn(&dt_backends_test_cmd.step);
+    test_step.dependOn(&dt_backends_test_cmd.step);
+
+    // Digital Twin World(T) — generic ECS world over storage backends (headless)
+    const dt_world_test_cmd = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "test",
+        "engine/ecs/world.zig",
+        "-ODebug",
+        "--cache-dir",
+        ".zig-cache",
+    });
+    const dt_world_test_step = b.step("test-dt-world", "Run digital twin World(T) tests");
+    dt_world_test_step.dependOn(&dt_world_test_cmd.step);
+    test_step.dependOn(&dt_world_test_cmd.step);
+
+    // Digital Twin benchmark queries — golden-result equivalence tests (headless)
+    const dt_queries_test_cmd = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "test",
+        "engine/benchmark_test.zig",
+        "-ODebug",
+        "--cache-dir",
+        ".zig-cache",
+    });
+    const dt_queries_test_step = b.step("test-dt-queries", "Run digital twin benchmark query tests");
+    dt_queries_test_step.dependOn(&dt_queries_test_cmd.step);
+    test_step.dependOn(&dt_queries_test_cmd.step);
+
+    // Digital Twin metrics system — latency/throughput/memory recording (headless)
+    const dt_metrics_test_cmd = b.addSystemCommand(&.{
+        b.graph.zig_exe,
+        "test",
+        "engine/metrics_test.zig",
+        "-ODebug",
+        "--cache-dir",
+        ".zig-cache",
+    });
+    const dt_metrics_test_step = b.step("test-dt-metrics", "Run digital twin metrics system tests");
+    dt_metrics_test_step.dependOn(&dt_metrics_test_cmd.step);
+    test_step.dependOn(&dt_metrics_test_cmd.step);
 }
