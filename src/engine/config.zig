@@ -10,10 +10,22 @@ pub const Config = struct {
     vsync: bool = true,
     hot_reload_shaders: bool = builtin.mode == .Debug,
 
-    camera: CameraConfig = .{},
-    lighting: LightingConfig = .{},
+    camera: CameraConfig = .{ .position = .{ 0.0, 1.4, 3.2 }, .target = .{ 0.0, 0.85, 0.0 } },
+    lighting: LightingConfig = .{ .color = .{ 0.65, 0.65, 0.6 }, .ambient = 0.08 },
     audio: AudioConfig = .{},
-    scenes: []const SceneConfig = &.{},
+    scenes: []const SceneConfig = &.{
+        .{
+            .name = "Duck Pond",
+            .path = "assets/duck/scene.gltf",
+            .camera_position = .{ 0.0, 1.4, 3.2 },
+            .camera_target = .{ 0.0, 0.85, 0.0 },
+            .offset = .{ 0.0, 0.0, 0.0 },
+            .rotates = true,
+            .audio_clip_path = "assets/audio/Duck/mac-quack.mp3",
+            .audio_min_distance = 0.5,
+            .audio_max_distance = 15.0,
+        },
+    },
 
     pub const CameraConfig = struct {
         position: @Vector(3, f32) = .{ 0.0, 0.5, 3.0 },
@@ -48,6 +60,12 @@ pub const Config = struct {
         camera_target: @Vector(3, f32),
         offset: @Vector(3, f32),
         rotates: bool = false,
+
+        /// Attached, spatialized, as an AudioSourceComponent on the scene's
+        /// first spawned primitive when set — null plays no scene audio.
+        audio_clip_path: ?[]const u8 = null,
+        audio_min_distance: f32 = 1.0,
+        audio_max_distance: f32 = 1000.0,
     };
 };
 

@@ -121,6 +121,9 @@ pub const SceneComponent = struct {
     camera_target: @Vector(3, f32) = .{ 0.0, 0.5, 0.0 },
     offset: @Vector(3, f32) = .{ 0.0, 0.0, 0.0 },
     rotates: bool = false,
+    audio_clip_path: ?[]const u8 = null,
+    audio_min_distance: f32 = 1.0,
+    audio_max_distance: f32 = 1000.0,
 };
 
 pub const SceneActiveTag = struct {};

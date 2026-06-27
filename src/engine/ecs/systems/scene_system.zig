@@ -13,6 +13,7 @@ const MeshCache = @import("../../../resources/meshCache.zig").MeshCache;
 const math = @import("../../math.zig");
 const shared_state = @import("shared_state.zig");
 const log = @import("../../log.zig");
+const audio_shared = @import("../../../audio/audio_shared.zig");
 const clip_mod = @import("../../../animation/clip.zig");
 
 pub const PreloadedScene = struct {
@@ -224,8 +225,10 @@ pub const SceneSystemState = struct {
     fn spawnSceneEntities(self: *SceneSystemState, registry: *Registry, scene_entity: Entity, scene: components.SceneComponent, preloaded: *const PreloadedScene) !void {
         _ = self;
 
+        var first_entity: ?Entity = null;
         for (preloaded.primitives) |prim| {
             const entity = try registry.create();
+            if (first_entity == null) first_entity = entity;
 
             const mesh_id = preloaded.mesh_ids[prim.mesh_idx];
             try registry.add(entity, components.MeshComponent{ .mesh_id = mesh_id });
@@ -274,7 +277,36 @@ pub const SceneSystemState = struct {
             shared_state.fly_cam.pitch = std.math.asin(std.math.clamp(dir[1], -1.0, 1.0));
         }
 
+        if (scene.audio_clip_path) |clip_path| {
+            if (first_entity) |entity| {
+                try attachSceneAudio(registry, entity, scene, clip_path);
+            }
+        }
+
         log.info(@src(), "scene_system: spawned '{s}' ({d} primitives)", .{ scene.name, preloaded.primitives.len });
+    }
+
+    /// Loads `clip_path` onto the routed sfx bus and attaches it, spatialized,
+    /// to the scene's first primitive entity so it follows that entity's own
+    /// transform (e.g. MovementSystem.rotates) and pans/attenuates via
+    /// Audio3DSystem as the camera moves — data-driven from SceneConfig
+    /// rather than gameplay code reaching into the registry after the fact.
+    /// Audio system's create() (priority 4) always finishes during world init
+    /// before scene_system's first update() tick runs this, so audio_shared's
+    /// globals are guaranteed non-null here.
+    fn attachSceneAudio(registry: *Registry, entity: Entity, scene: components.SceneComponent, clip_path: []const u8) !void {
+        const audio_engine = audio_shared.engine orelse return;
+        const clip_cache = audio_shared.clip_cache orelse return;
+        const sfx_group = if (audio_shared.mixer) |mx| mx.group(.sfx) else null;
+
+        const clip_id = try clip_cache.register(audio_engine, clip_path, sfx_group);
+        try registry.add(entity, components.AudioSourceComponent{
+            .clip_id = clip_id,
+            .auto_play = true,
+            .spatialized = true,
+            .min_distance = scene.audio_min_distance,
+            .max_distance = scene.audio_max_distance,
+        });
     }
 };
 
@@ -442,6 +474,9 @@ fn spawnScenes(registry: *Registry, scene_configs: []const config_mod.Config.Sce
             .camera_target = sc.camera_target,
             .offset = sc.offset,
             .rotates = sc.rotates,
+            .audio_clip_path = sc.audio_clip_path,
+            .audio_min_distance = sc.audio_min_distance,
+            .audio_max_distance = sc.audio_max_distance,
         });
     }
 }
