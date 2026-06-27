@@ -68,6 +68,15 @@ void jolt_character_update(JoltCtx* ctx, JoltCharacter* ch, float dt, float grav
 void jolt_character_get_position(JoltCharacter* ch, float* out_xyz);
 bool jolt_character_is_grounded(JoltCharacter* ch);
 
+// Sphere overlap query (melee hitboxes). Writes up to max_hits body ids into
+// out_body_ids, returns the number written. No filtering by layer/body —
+// callers resolve body ids back to entities and skip the attacker themselves.
+int jolt_overlap_sphere(JoltCtx* ctx, float cx, float cy, float cz, float radius,
+                         uint32_t* out_body_ids, int max_hits);
+
+// Applies an instantaneous impulse at a dynamic body's center of mass.
+void jolt_apply_impulse(JoltCtx* ctx, uint32_t body_id, float ix, float iy, float iz);
+
 // Trigger events, drained from the contact-listener queue populated during jolt_step.
 typedef struct {
     uint32_t trigger_body;

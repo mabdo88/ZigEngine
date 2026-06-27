@@ -18,6 +18,8 @@
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyActivationListener.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
@@ -325,6 +327,28 @@ void jolt_character_get_position(JoltCharacter* ch, float* out_xyz) {
 
 bool jolt_character_is_grounded(JoltCharacter* ch) {
     return ch->character->IsSupported();
+}
+
+int jolt_overlap_sphere(JoltCtx* ctx, float cx, float cy, float cz, float radius,
+                         uint32_t* out_body_ids, int max_hits) {
+    SphereShape sphere_shape(radius);
+    RMat44 com_transform = RMat44::sTranslation(RVec3(cx, cy, cz));
+
+    CollideShapeSettings settings;
+    AllHitCollisionCollector<CollideShapeCollector> collector;
+    ctx->physics_system.GetNarrowPhaseQuery().CollideShape(
+        &sphere_shape, Vec3::sReplicate(1.0f), com_transform, settings, RVec3(cx, cy, cz), collector);
+
+    int n = 0;
+    for (const CollideShapeResult& result : collector.mHits) {
+        if (n >= max_hits) break;
+        out_body_ids[n++] = result.mBodyID2.GetIndexAndSequenceNumber();
+    }
+    return n;
+}
+
+void jolt_apply_impulse(JoltCtx* ctx, uint32_t body_id, float ix, float iy, float iz) {
+    ctx->physics_system.GetBodyInterface().AddImpulse(BodyID(body_id), Vec3(ix, iy, iz));
 }
 
 bool jolt_poll_trigger_event(JoltCtx* ctx, JoltTriggerEvent* out_event) {

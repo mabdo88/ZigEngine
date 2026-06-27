@@ -1,0 +1,10 @@
+{
+  "name": "fireball",
+  "cooldown": 5.0,
+  "resource_cost": 20.0,
+  "cast_time": 0.5,
+  "effects": [
+    { "kind": "damage", "amount": 30.0 },
+    { "kind": "knockback", "amount": 8.0 }
+  ]
+}

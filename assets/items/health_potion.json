@@ -1,0 +1,8 @@
+{
+  "name": "health_potion",
+  "max_stack": 10,
+  "consumable": true,
+  "effects": [
+    { "kind": "heal", "amount": 25.0 }
+  ]
+}

@@ -17,6 +17,10 @@ pub const Key = struct {
     pub const a = c.GLFW_KEY_A;
     pub const s = c.GLFW_KEY_S;
     pub const d = c.GLFW_KEY_D;
+    pub const space = c.GLFW_KEY_SPACE;
+    pub const left_shift = c.GLFW_KEY_LEFT_SHIFT;
+    pub const f5 = c.GLFW_KEY_F5;
+    pub const f9 = c.GLFW_KEY_F9;
 };
 
 pub const MouseButton = struct {

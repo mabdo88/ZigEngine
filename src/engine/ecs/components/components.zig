@@ -45,6 +45,14 @@ pub const AllComponents = .{
     SpawnPointComponent,
     SpawnedByComponent,
     AudioSourceComponent,
+    HealthComponent,
+    PlayerMovementComponent,
+    MeleeAttackComponent,
+    AbilitySlotsComponent,
+    InventoryComponent,
+    PickupComponent,
+    AIComponent,
+    ProjectileComponent,
 };
 
 pub const MeshComponent = struct {
@@ -284,4 +292,190 @@ pub const AudioSourceComponent = struct {
     rolloff: f32 = 1.0,
     min_distance: f32 = 1.0,
     max_distance: f32 = std.math.floatMax(f32),
+};
+
+/// current/max are f32 (not integers) so regen_per_sec*dt accumulates
+/// fractionally instead of getting truncated away every frame.
+/// `invincible` is a permanent flag (boss phases, debug); `invincible_timer`
+/// is a temporary one (i-frames after a hit) — both gate damage in
+/// gameplay/health.zig's onDamage, checked independently so neither
+/// overwrites the other's intent. `iframe_duration` is how long a *surviving*
+/// hit grants free i-frames for (0 = no auto i-frames on hit, the prior
+/// default behavior) — onDamage sets invincible_timer = iframe_duration after
+/// damage lands, so this is the configuration knob, invincible_timer is the
+/// runtime countdown.
+pub const HealthComponent = struct {
+    current: f32,
+    max: f32,
+    regen_per_sec: f32 = 0,
+    invincible: bool = false,
+    invincible_timer: f32 = 0,
+    iframe_duration: f32 = 0,
+};
+
+/// Drives a one-shot melee hitbox via jolt_overlap_sphere, attached to
+/// whatever entity is doing the attacking (player or enemy — generic, not
+/// player-specific). Gameplay code sets `trigger = true` to request an
+/// attack on the next eligible frame; gameplay/combat.zig's MeleeAttackSystem
+/// clears it back to false the instant it actually fires (whether or not
+/// anything was hit) and resets cooldown_timer, so holding `trigger` true
+/// doesn't spam attacks every frame. Hitbox center is the attacker's
+/// TransformComponent position plus `range` along its facing (derived from
+/// rotation.y, matching transformToMatrix's yaw convention) — not
+/// camera-relative like PlayerMovementComponent, since enemies have no
+/// camera to read from.
+pub const MeleeAttackComponent = struct {
+    range: f32 = 1.5,
+    radius: f32 = 0.6,
+    damage: f32 = 10.0,
+    impulse: f32 = 5.0,
+    cooldown: f32 = 0.6,
+    cooldown_timer: f32 = 0,
+    trigger: bool = false,
+};
+
+/// One ability bound to a slot — ability_id indexes gameplay/ability.zig's
+/// AbilityRegistry (POD, same id-not-pointer pattern as PrefabInstanceComponent's
+/// prefab_id), invalid_ability_id means the slot is empty. cooldown_timer is
+/// per-slot runtime state, separate from AbilitySlotsComponent's single
+/// shared cast_timer (one cast at a time, but each slot cools down
+/// independently).
+pub const invalid_ability_id: u32 = std.math.maxInt(u32);
+
+pub const AbilitySlot = struct {
+    ability_id: u32 = invalid_ability_id,
+    cooldown_timer: f32 = 0,
+};
+
+/// One stack of an item — item_id indexes gameplay/item.zig's ItemRegistry
+/// (same id-not-pointer pattern as AbilitySlot.ability_id), invalid_item_id
+/// means the slot is empty. count is capped at the def's max_stack by
+/// gameplay/item.zig's addItem, never by the component itself (POD, no
+/// access to the registry to check against).
+pub const invalid_item_id: u32 = std.math.maxInt(u32);
+
+pub const ItemStack = struct {
+    item_id: u32 = invalid_item_id,
+    count: u32 = 0,
+};
+
+const empty_item_stacks: [20]ItemStack = blk: {
+    var arr: [20]ItemStack = undefined;
+    for (&arr) |*s| s.* = .{};
+    break :blk arr;
+};
+
+/// `items[20]` are stackable consumables/materials; `relics[3]` are unique
+/// passive items addressed directly by item_id (no count — relics aren't
+/// stacked or consumed). `request_use_slot` is a one-shot request gameplay
+/// code sets to ask for items[slot] to be used — gameplay/item.zig's
+/// PickupSystem/ItemSystem consumes and clears it immediately, same pattern
+/// MeleeAttackComponent.trigger and AbilitySlotsComponent.request_cast
+/// already use. Not yet wired into scene_save.zig/scene_load.zig (M9's
+/// Save/Load task is what will do that) — deliberately POD/id-based exactly
+/// so that wiring is a small addition later, not a redesign.
+pub const InventoryComponent = struct {
+    items: [20]ItemStack = empty_item_stacks,
+    relics: [3]u32 = .{ invalid_item_id, invalid_item_id, invalid_item_id },
+    request_use_slot: ?u8 = null,
+};
+
+/// Marks a TriggerWatcherComponent entity as a world item pickup —
+/// gameplay/item.zig's PickupSystem grants item_id/count to whichever
+/// entity's InventoryComponent enters the trigger, then destroys this
+/// entity (despawning its physics body first, same caveat
+/// PhysicsBodyComponent's doc comment already notes).
+pub const PickupComponent = struct {
+    item_id: u32,
+    count: u32 = 1,
+};
+
+/// patrol -> chase -> attack -> retreat, plus a terminal `dead` set by
+/// gameplay/ai.zig's AISystem subscribing to `.death_event` (never entered by
+/// the per-frame state logic itself). Basis for Knave boss behavior trees —
+/// deliberately a flat per-state switch rather than a generic transition
+/// table (unlike animation/state_machine.zig, which blends poses — a
+/// different domain with different needs), so a boss can later override
+/// individual states or add new ones without fighting a framework.
+pub const AIState = enum {
+    patrol,
+    chase,
+    attack,
+    retreat,
+    dead,
+};
+
+/// `patrol_points`/`patrol_count` are a fixed-size POD waypoint loop (no
+/// allocator — same "no heap allocations inside component data" rule as
+/// everything else). `target` is acquired by AISystem's sight scan (currently
+/// "nearest PlayerMovementComponent entity in range with clear line of
+/// sight" — there's no faction/threat-table system yet, so this is the one
+/// stand-in target type until one exists). `retreat_health_fraction` is
+/// checked every frame regardless of current state — health takes priority
+/// over whatever combat state the AI was in.
+pub const AIComponent = struct {
+    state: AIState = .patrol,
+    patrol_points: [4]@Vector(3, f32) = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } },
+    patrol_count: u8 = 0,
+    patrol_index: u8 = 0,
+    patrol_speed: f32 = 2.0,
+    chase_speed: f32 = 4.0,
+    sight_range: f32 = 10.0,
+    attack_range: f32 = 1.5,
+    retreat_health_fraction: f32 = 0.2,
+    target: ?Entity = null,
+};
+
+/// `owner` is excluded from its own first-hit check (gameplay/projectile.zig's
+/// ProjectileSystem sweeps a per-frame raycast along `velocity*dt`, starting
+/// right where the firing entity's own collider already is) — without this,
+/// every projectile would immediately self-destruct against its shooter.
+/// `impact_prefab_id` is optional (no sentinel needed, unlike ability_id/
+/// item_id — this is the only POD id field in the project that's genuinely
+/// absent rather than "0 means the first registered thing") and indexes
+/// scene/prefab.zig's PrefabRegistry for a VFX prefab to spawn at the hit
+/// point.
+pub const ProjectileComponent = struct {
+    velocity: @Vector(3, f32) = .{ 0, 0, 0 },
+    damage: f32 = 10.0,
+    owner: ?Entity = null,
+    lifetime: f32 = 5.0,
+    impulse: f32 = 0,
+    impact_prefab_id: ?u32 = null,
+};
+
+/// `request_cast`/`request_target` are one-shot requests gameplay code sets
+/// to ask for a cast — gameplay/ability.zig's AbilitySystem consumes and
+/// clears both the instant it reads them, same one-shot-flag pattern
+/// MeleeAttackComponent.trigger already uses. `casting_slot`/`casting_target`
+/// are the system's own runtime state once a cast with cast_time > 0 is in
+/// flight — captured at cast-start rather than re-reading request_target,
+/// since request_target could be overwritten by gameplay before the cast
+/// actually resolves.
+pub const AbilitySlotsComponent = struct {
+    slots: [6]AbilitySlot = .{ .{}, .{}, .{}, .{}, .{}, .{} },
+    resource: f32 = 100,
+    casting_slot: ?u8 = null,
+    casting_target: ?Entity = null,
+    cast_timer: f32 = 0,
+    request_cast: ?u8 = null,
+    request_target: ?Entity = null,
+};
+
+/// Drives a CharacterControllerComponent on the same entity — see
+/// gameplay/movement.zig's PlayerMovementSystem. `velocity` is runtime state
+/// (current horizontal world-space velocity, y always 0 — vertical speed
+/// lives in the Jolt character itself, see character_controller.zig), kept
+/// here rather than recomputed from scratch each frame so accel/friction can
+/// lerp toward a target instead of snapping to it. `footstep_distance` is the
+/// matching runtime accumulator for footstep_interval.
+pub const PlayerMovementComponent = struct {
+    walk_speed: f32 = 4.0,
+    sprint_multiplier: f32 = 1.8,
+    acceleration: f32 = 20.0,
+    friction: f32 = 25.0,
+    jump_speed: f32 = 5.0,
+    footstep_interval: f32 = 1.8,
+    velocity: @Vector(3, f32) = .{ 0, 0, 0 },
+    footstep_distance: f32 = 0,
 };

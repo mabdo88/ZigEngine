@@ -100,6 +100,8 @@ pub const JoltTriggerEvent = extern struct {
     other_body: u32 = 0,
     is_enter: bool = false,
 };
+pub extern fn jolt_overlap_sphere(ctx: ?*JoltCtx, cx: f32, cy: f32, cz: f32, radius: f32, out_body_ids: [*c]u32, max_hits: c_int) c_int;
+pub extern fn jolt_apply_impulse(ctx: ?*JoltCtx, body_id: u32, ix: f32, iy: f32, iz: f32) void;
 pub extern fn jolt_poll_trigger_event(ctx: ?*JoltCtx, out_event: [*c]JoltTriggerEvent) bool;
 
 pub const __VERSION__ = "Aro aro-zig";

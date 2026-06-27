@@ -61,6 +61,16 @@ pub const InputSystemState = struct {
         if (self.input.isDown(window.Key.s)) fc.move_forward -= 1.0;
         if (self.input.isDown(window.Key.d)) fc.move_right += 1.0;
         if (self.input.isDown(window.Key.a)) fc.move_right -= 1.0;
+
+        shared_state.player_input = .{
+            .move_forward = fc.move_forward,
+            .move_right = fc.move_right,
+            .sprint = self.input.isDown(window.Key.left_shift),
+            .jump_pressed = self.input.justPressed(window.Key.space),
+        };
+
+        if (self.input.justPressed(window.Key.f5)) shared_state.save_request.quicksave = true;
+        if (self.input.justPressed(window.Key.f9)) shared_state.save_request.quickload = true;
     }
 };
 

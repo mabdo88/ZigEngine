@@ -48,6 +48,31 @@ pub const PhysicsWorld = struct {
     pub fn unregisterBody(self: *PhysicsWorld, body_id: u32) void {
         _ = self.body_to_entity.remove(body_id);
     }
+
+    /// Sphere overlap query (melee hitboxes) — resolves every overlapping
+    /// body back to an entity via body_to_entity, silently skipping bodies
+    /// with no mapping (shouldn't happen, every body goes through
+    /// spawnBoxBody, same defensive skip raycast.zig already does). Caps at
+    /// a 32-entry stack buffer regardless of out_entities' size, matching
+    /// raycastAll's fixed-cap reasoning — current gameplay-scale melee hits
+    /// never need more.
+    pub fn overlapSphere(self: *PhysicsWorld, center: @Vector(3, f32), radius: f32, out_entities: []Entity) usize {
+        var body_ids: [32]u32 = undefined;
+        const max_hits: c_int = @intCast(@min(body_ids.len, out_entities.len));
+        const n = jolt.jolt_overlap_sphere(self.ctx, center[0], center[1], center[2], radius, &body_ids, max_hits);
+
+        var count: usize = 0;
+        for (body_ids[0..@intCast(n)]) |body_id| {
+            const entity = self.entityForBody(body_id) orelse continue;
+            out_entities[count] = entity;
+            count += 1;
+        }
+        return count;
+    }
+
+    pub fn applyImpulse(self: *PhysicsWorld, body_id: u32, impulse: @Vector(3, f32)) void {
+        jolt.jolt_apply_impulse(self.ctx, body_id, impulse[0], impulse[1], impulse[2]);
+    }
 };
 
 /// Creates a box body in Jolt, attaches PhysicsBodyComponent, and registers

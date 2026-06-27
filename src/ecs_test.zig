@@ -50,4 +50,6 @@ comptime {
     _ = @import("animation/blend_tree.zig");
     _ = @import("animation/state_machine.zig");
     _ = @import("engine/ecs/systems/anim_player_system.zig");
+    // Gameplay
+    _ = @import("gameplay/health.zig");
 }
